@@ -1,0 +1,74 @@
+id: AZ-ACT-001
+name: Privileged Azure RBAC role assigned outside approved callers
+description: |
+  A highly privileged Azure RBAC role (Owner, User Access Administrator,
+  Role Based Access Control Administrator or Contributor) was assigned by a
+  principal that is not on the approved-callers watchlist. Adversaries grant
+  themselves or an attacker-controlled identity persistent control-plane
+  access this way.
+severity: High
+requires: [azure_activity]
+tactics: [PrivilegeEscalation, Persistence]
+techniques: [T1098]
+sub_techniques: [T1098.003]
+query_frequency: PT10M
+query_period: PT1H
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  let privileged_roles = dynamic([
+      "8e3af657-a8ff-443c-a75c-2fe8c4bcb635",  // Owner
+      "18d7d88d-d35e-4fb5-a5c3-7773c20a72d9",  // User Access Administrator
+      "f58310d9-a9f6-439a-9e8d-f62e7b41a168",  // Role Based Access Control Administrator
+      "b24988ac-6180-42a0-ab88-20f7382dd24c"   // Contributor
+  ]);
+  let approved_callers = _GetWatchlist("${watchlist_alias}") | project tostring(SearchKey);
+  AzureActivity
+  | where OperationNameValue =~ "MICROSOFT.AUTHORIZATION/ROLEASSIGNMENTS/WRITE"
+  | extend RequestBody = tostring(Properties_d.requestbody)
+  // The request body is on the Start event, the outcome on the Success event:
+  // stitch them together by CorrelationId.
+  | summarize
+      TimeGenerated   = max(TimeGenerated),
+      RequestBody     = take_anyif(RequestBody, isnotempty(RequestBody)),
+      Statuses        = make_set(ActivityStatusValue),
+      Caller          = take_any(Caller),
+      CallerIpAddress = take_any(CallerIpAddress),
+      AssignmentId    = take_any(_ResourceId)
+      by CorrelationId
+  | where Statuses has_any ("Success", "Succeeded")
+  | extend RoleDefinitionId    = tolower(extract(@"roleDefinitions/([0-9a-fA-F-]{36})", 1, RequestBody)),
+           AssigneePrincipalId = extract(@"(?i)""PrincipalId""\s*:\s*""([0-9a-fA-F-]{36})""", 1, RequestBody)
+  | where RoleDefinitionId in (privileged_roles)
+  | where Caller !in~ (approved_callers)
+  | extend RoleName = case(
+      RoleDefinitionId == "8e3af657-a8ff-443c-a75c-2fe8c4bcb635", "Owner",
+      RoleDefinitionId == "18d7d88d-d35e-4fb5-a5c3-7773c20a72d9", "User Access Administrator",
+      RoleDefinitionId == "f58310d9-a9f6-439a-9e8d-f62e7b41a168", "RBAC Administrator",
+      "Contributor")
+  | extend Scope = tostring(split(AssignmentId, "/providers/microsoft.authorization/roleassignments/")[0])
+  | project TimeGenerated, Caller, CallerIpAddress, RoleName, RoleDefinitionId,
+            AssigneePrincipalId, Scope, CorrelationId
+entity_mappings:
+  - entity_type: Account
+    field_mappings:
+      - identifier: FullName
+        column_name: Caller
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: CallerIpAddress
+  - entity_type: AzureResource
+    field_mappings:
+      - identifier: ResourceId
+        column_name: Scope
+custom_details:
+  RoleName: RoleName
+  AssigneePrincipalId: AssigneePrincipalId
+simulation: simulate/scenarios/az-act-001-role-assignment.sh
+false_positives:
+  - IaC pipelines and break-glass accounts - add them to the watchlist.
+  - Subscription onboarding / landing-zone vending.
+references:
+  - https://attack.mitre.org/techniques/T1098/003/
+  - https://learn.microsoft.com/azure/role-based-access-control/built-in-roles
