@@ -36,6 +36,7 @@ TEMPLATE_VARS = {
     "key_vault_name": "kv-<prefix>-<suffix>",
     "storage_name": "st<prefix><suffix>",
     "watchlist_alias": "LabApprovedPrivilegedCallers",
+    "canary_watchlist_alias": "LabCanaryAccounts",
 }
 
 REQUIRED = [
@@ -43,7 +44,8 @@ REQUIRED = [
     "query_frequency", "query_period", "query", "entity_mappings", "simulation",
 ]
 SEVERITIES = {"Informational", "Low", "Medium", "High"}
-SOURCES = {"azure_activity", "key_vault", "storage", "windows_vm", "linux_vm"}
+SOURCES = {"azure_activity", "key_vault", "storage", "windows_vm", "linux_vm", "entra_id", "entra_id_p2"}
+OVERRIDE_KEYS = {"display_name_format", "description_format", "severity_column_name", "tactics_column_name"}
 # Kill-chain order (a list, not a set, so generated output is deterministic).
 TACTIC_ORDER = [
     "Reconnaissance", "ResourceDevelopment", "InitialAccess", "Execution", "Persistence",
@@ -166,6 +168,25 @@ def validate(path: Path, doc: dict, seen: dict[str, Path]) -> list[str]:
             e.append(f"custom_details key {key!r} must be alphanumeric, <= 20 chars")
         if not re.search(rf"\b{re.escape(col)}\b", query):
             e.append(f"custom_details column {col!r} not found in query")
+
+    ado = doc.get("alert_details_override")
+    if ado is not None:
+        if not isinstance(ado, dict) or not ado:
+            e.append("alert_details_override must be a non-empty mapping")
+        else:
+            for k in set(ado) - OVERRIDE_KEYS:
+                e.append(f"alert_details_override: unknown key {k!r}")
+            fmt = ado.get("display_name_format")
+            if fmt is not None and not str(fmt).startswith(f"[{rid}] "):
+                e.append(f"display_name_format must start with '[{rid}] ' (verify.sh matches on it)")
+            for k in ("display_name_format", "description_format"):
+                for col in re.findall(r"\{\{(\w+)\}\}", str(ado.get(k, ""))):
+                    if not re.search(rf"\b{re.escape(col)}\b", query):
+                        e.append(f"{k}: placeholder {{{{{col}}}}} is not a column in the query")
+            for k in ("severity_column_name", "tactics_column_name"):
+                col = ado.get(k)
+                if col and not re.search(rf"\b{re.escape(col)}\b", query):
+                    e.append(f"{k}: column {col!r} not found in query")
 
     sim = ROOT / doc["simulation"]
     if not sim.is_file():
