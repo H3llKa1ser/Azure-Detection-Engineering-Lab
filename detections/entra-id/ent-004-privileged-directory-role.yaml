@@ -1,0 +1,78 @@
+id: ENT-004
+name: Privileged Entra ID directory role assigned
+description: |
+  A highly privileged Entra ID directory role (Global Administrator,
+  Privileged Role Administrator, Application Administrator, ...) was
+  assigned, including PIM eligible assignments and activations. Tenant-level
+  role grants are the identity equivalent of AZ-ACT-001 and the fastest
+  route from a foothold to full tenant control.
+severity: High
+requires: [entra_id]
+tactics: [PrivilegeEscalation, Persistence]
+techniques: [T1098]
+sub_techniques: [T1098.003]
+query_frequency: PT15M
+query_period: PT1H
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  let privileged_roles = dynamic([
+      "Global Administrator", "Privileged Role Administrator", "Privileged Authentication Administrator",
+      "Security Administrator", "Application Administrator", "Cloud Application Administrator",
+      "User Administrator", "Authentication Administrator", "Conditional Access Administrator",
+      "Exchange Administrator", "Hybrid Identity Administrator", "SharePoint Administrator"]);
+  let privileged_role_ids = dynamic([
+      "62e90394-69f5-4237-9190-012177145e10", "e8611ab8-c189-46e8-94e1-60213ab1f814",
+      "7be44c8a-adaf-4e2a-84d6-ab2649e08a13", "194ae4cb-b126-40b2-bd5b-6091b380977d",
+      "9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3", "158c047a-c907-4556-b7ef-446551a6b5f7",
+      "fe930be7-5e62-47db-91af-98c3a49a38b1", "c4e39bd9-1100-46d3-8c65-fb160da0071f",
+      "b1be1c3e-b65d-4f19-8427-f6fa0d97feb9", "29232cdf-9323-42fd-ade2-1d097af3e4de",
+      "8ac3fc64-6eca-42ea-9e69-59f4c7b60eb2", "f28a1f50-f6e7-4571-818b-6a12f2af6b6c"]);
+  AuditLogs
+  | where Category =~ "RoleManagement"
+  | where OperationName matches regex @"(?i)^add (eligible )?member to role"
+  | where Result =~ "success"
+  // Role name / template ID live in the modifiedProperties of the targets.
+  | mv-apply tr = TargetResources on (
+        mv-expand mp = tr.modifiedProperties
+        | summarize
+            RoleName       = take_anyif(trim(@'"', tostring(mp.newValue)), tostring(mp.displayName) in ("Role.DisplayName", "RoleDefinition.DisplayName")),
+            RoleTemplateId = take_anyif(trim(@'"', tostring(mp.newValue)), tostring(mp.displayName) in ("Role.TemplateId", "RoleDefinition.TemplateId")))
+  | extend Serialized = tostring(TargetResources)
+  | extend RoleName = iff(isempty(RoleName),
+        extract(@"(Global Administrator|Privileged Role Administrator|Privileged Authentication Administrator|Security Administrator|Application Administrator|Cloud Application Administrator|User Administrator|Authentication Administrator|Conditional Access Administrator|Exchange Administrator|Hybrid Identity Administrator|SharePoint Administrator)", 1, Serialized),
+        RoleName)
+  | where RoleName in~ (privileged_roles) or RoleTemplateId in~ (privileged_role_ids)
+  | extend Assignee = coalesce(tostring(TargetResources[0].userPrincipalName), tostring(TargetResources[0].displayName)),
+           AssigneeId = tostring(TargetResources[0].id), AssigneeType = tostring(TargetResources[0].type)
+  | extend InitiatorUpn = tostring(InitiatedBy.user.userPrincipalName),
+           InitiatorApp = tostring(InitiatedBy.app.displayName),
+           InitiatorIp  = tostring(InitiatedBy.user.ipAddress)
+  | extend Initiator = coalesce(InitiatorUpn, InitiatorApp)
+  | project TimeGenerated, OperationName, RoleName, RoleTemplateId, Assignee, AssigneeId, AssigneeType,
+            Initiator, InitiatorUpn, InitiatorIp, CorrelationId
+entity_mappings:
+  - entity_type: Account
+    field_mappings:
+      - identifier: FullName
+        column_name: InitiatorUpn
+  - entity_type: Account
+    field_mappings:
+      - identifier: AadUserId
+        column_name: AssigneeId
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: InitiatorIp
+custom_details:
+  RoleName: RoleName
+  Assignee: Assignee
+  Operation: OperationName
+alert_details_override:
+  display_name_format: "[ENT-004] {{RoleName}} assigned to {{Assignee}}"
+simulation: simulate/scenarios/ent-004-privileged-directory-role.sh
+false_positives:
+  - Planned admin onboarding. With PIM, eligible assignments by the PIM service account are expected - alert on activations from new IPs instead.
+references:
+  - https://attack.mitre.org/techniques/T1098/003/
+  - https://learn.microsoft.com/entra/identity/role-based-access-control/permissions-reference
