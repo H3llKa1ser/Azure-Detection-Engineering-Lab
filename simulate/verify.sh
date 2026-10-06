@@ -7,7 +7,13 @@ source "$(dirname "$0")/lib/common.sh"
 require_env
 hours="${1:-2}"
 
-expected="$(grep -rh --include='*.yaml' '^id:' "${SIM_ROOT}/../detections" | awk '{print $2}' | sort -u)"
+# Only expect what is actually deployed (rules whose data source is switched
+# off are skipped by Terraform). Falls back to every YAML file.
+if [[ -n "${DEPLOYED_DETECTIONS:-}" ]]; then
+  expected="$(tr ' ' '\n' <<< "$DEPLOYED_DETECTIONS" | sort -u)"
+else
+  expected="$(grep -rh --include='*.yaml' '^id:' "${SIM_ROOT}/../detections" | awk '{print $2}' | sort -u)"
+fi
 
 read -r -d '' kql <<KQL || true
 SecurityAlert
@@ -34,4 +40,5 @@ while read -r id; do
 done <<< "$expected"
 
 printf '\n%d fired, %d missing\n' "$pass" "$miss"
+[[ "$miss" -eq 0 ]] || warn "ENT-003..006 only fire if run with ALLOW_TENANT_CHANGES=1; ENT-007 is manual."
 [[ "$miss" -eq 0 ]] || warn "Missing alerts? Check ingestion first (e.g. 'AzureDiagnostics | take 1'), then the rule's health in Sentinel > Analytics."
