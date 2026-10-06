@@ -1,0 +1,12 @@
+{
+  "name": "detection-kql-check",
+  "private": true,
+  "description": "KQL syntax and semantic analysis for detection-as-code rules",
+  "scripts": {
+    "check": "node check.js"
+  },
+  "dependencies": {
+    "@kusto/language-service-next": "12.4.1",
+    "js-yaml": "^4.1.0"
+  }
+}
