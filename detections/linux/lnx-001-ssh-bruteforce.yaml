@@ -1,0 +1,48 @@
+id: LNX-001
+name: SSH authentication failures burst from a single source
+description: |
+  Many failed or aborted SSH authentication attempts from one source IP in
+  a short window, often across several usernames. Classic SSH brute force /
+  credential stuffing against a Linux host.
+severity: Medium
+requires: [linux_vm]
+tactics: [CredentialAccess]
+techniques: [T1110]
+sub_techniques: [T1110.001, T1110.003]
+query_frequency: PT10M
+query_period: PT30M
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  let attempt_threshold = 10;
+  Syslog
+  | where Facility in ("auth", "authpriv")
+  | where ProcessName startswith "sshd"
+  | where SyslogMessage matches regex @"(?i)(failed password|invalid user|authenticating user|authentication failure|failed publickey)"
+  | extend SourceIp = extract(@"(\d{1,3}(?:\.\d{1,3}){3})", 1, SyslogMessage),
+           TargetUser = extract(@"(?:[Ii]nvalid user|authenticating user|[Ff]ailed \w+ for(?: invalid user)?)\s+(\S+)", 1, SyslogMessage)
+  | where isnotempty(SourceIp)
+  | summarize Attempts = count(), DistinctUsers = dcount(TargetUser), Users = make_set(TargetUser, 20),
+              FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+              by Computer, HostIP, SourceIp
+  | where Attempts >= attempt_threshold
+  | project TimeGenerated = LastSeen, FirstSeen, Computer, HostIP, SourceIp, Attempts, DistinctUsers, Users
+entity_mappings:
+  - entity_type: Host
+    field_mappings:
+      - identifier: HostName
+        column_name: Computer
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: SourceIp
+custom_details:
+  Attempts: Attempts
+  DistinctUsers: DistinctUsers
+  Users: Users
+simulation: simulate/scenarios/lnx-sim-chain.sh
+false_positives:
+  - Internet-exposed hosts see this constantly - for those, alert on success-after-failure instead.
+  - Misconfigured automation with a rotated key.
+references:
+  - https://attack.mitre.org/techniques/T1110/
