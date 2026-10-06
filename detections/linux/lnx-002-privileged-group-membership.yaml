@@ -1,0 +1,44 @@
+id: LNX-002
+name: Linux user added to a root-equivalent group
+description: |
+  A user was created into, or added to, a group that grants root or
+  root-equivalent access (sudo, wheel, admin, root, adm, docker, lxd).
+  docker and lxd membership is effectively root and is frequently missed.
+severity: Medium
+requires: [linux_vm]
+tactics: [Persistence, PrivilegeEscalation]
+techniques: [T1098, T1136]
+sub_techniques: [T1136.001]
+query_frequency: PT10M
+query_period: PT30M
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  Syslog
+  | where Facility in ("auth", "authpriv")
+  | where ProcessName in ("usermod", "useradd", "gpasswd", "adduser", "groupmems")
+  | where SyslogMessage matches regex @"(?i)add '[^']+' to (shadow )?group '(sudo|wheel|admin|root|adm|docker|lxd)'"
+  | extend AddedUser = extract(@"add '([^']+)'", 1, SyslogMessage),
+           Group = extract(@"group '([^']+)'", 1, SyslogMessage)
+  | summarize TimeGenerated = max(TimeGenerated), Tools = make_set(ProcessName),
+              Messages = make_set(SyslogMessage, 5)
+              by Computer, HostIP, AddedUser, Group
+  | project TimeGenerated, Computer, HostIP, AddedUser, Group, Tools, Messages
+entity_mappings:
+  - entity_type: Host
+    field_mappings:
+      - identifier: HostName
+        column_name: Computer
+  - entity_type: Account
+    field_mappings:
+      - identifier: Name
+        column_name: AddedUser
+custom_details:
+  Group: Group
+  Tools: Tools
+simulation: simulate/scenarios/lnx-sim-chain.sh
+false_positives:
+  - Configuration management (cloud-init, Ansible) at provisioning time.
+references:
+  - https://attack.mitre.org/techniques/T1136/001/
+  - https://attack.mitre.org/techniques/T1098/
