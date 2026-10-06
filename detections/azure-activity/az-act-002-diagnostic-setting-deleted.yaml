@@ -1,0 +1,46 @@
+id: AZ-ACT-002
+name: Diagnostic setting deleted (logging tampering)
+description: |
+  A diagnostic setting was deleted. Removing diagnostic settings stops a
+  resource (or the whole subscription Activity Log) from streaming to the
+  SIEM - a classic step to blind defenders before acting on objectives.
+severity: High
+requires: [azure_activity]
+tactics: [DefenseEvasion]
+techniques: [T1562]
+sub_techniques: [T1562.008]
+query_frequency: PT10M
+query_period: PT1H
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  AzureActivity
+  | where OperationNameValue =~ "MICROSOFT.INSIGHTS/DIAGNOSTICSETTINGS/DELETE"
+  | where ActivityStatusValue in~ ("Success", "Succeeded")
+  | extend TargetResource = tostring(split(_ResourceId, "/providers/microsoft.insights/diagnosticsettings/")[0]),
+           DiagnosticSetting = tostring(split(_ResourceId, "/")[-1])
+  | summarize TimeGenerated = max(TimeGenerated), Caller = take_any(Caller),
+              CallerIpAddress = take_any(CallerIpAddress)
+              by CorrelationId, TargetResource, DiagnosticSetting
+  | project TimeGenerated, Caller, CallerIpAddress, TargetResource, DiagnosticSetting, CorrelationId
+entity_mappings:
+  - entity_type: Account
+    field_mappings:
+      - identifier: FullName
+        column_name: Caller
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: CallerIpAddress
+  - entity_type: AzureResource
+    field_mappings:
+      - identifier: ResourceId
+        column_name: TargetResource
+custom_details:
+  DiagnosticSetting: DiagnosticSetting
+simulation: simulate/scenarios/az-act-002-diag-setting-delete.sh
+false_positives:
+  - Planned decommissioning or migration of a logging destination.
+  - terraform destroy of this lab (expected - and a nice reminder the rule works).
+references:
+  - https://attack.mitre.org/techniques/T1562/008/
