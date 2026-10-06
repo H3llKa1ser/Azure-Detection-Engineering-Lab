@@ -1,0 +1,52 @@
+id: WIN-001
+name: Burst of failed logons against a Windows host
+description: |
+  A high number of failed logons (4625) for one account on one host within
+  a short window. Indicates password guessing, a spray tool, or a broken
+  service credential. WIN-002 escalates this when a success follows.
+severity: Medium
+requires: [windows_vm]
+tactics: [CredentialAccess]
+techniques: [T1110]
+sub_techniques: [T1110.001]
+query_frequency: PT10M
+query_period: PT30M
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  let failure_threshold = 10;
+  SecurityEvent
+  | where EventID == 4625
+  | extend TargetAccount = tolower(TargetUserName),
+           SourceIp = iff(IpAddress in ("-", ""), "", IpAddress)
+  | summarize FailedCount = count(), FirstFailure = min(TimeGenerated), LastFailure = max(TimeGenerated),
+              SourceIps = make_set(SourceIp, 20), LogonTypes = make_set(LogonType),
+              FailureReasons = make_set(SubStatus, 10)
+              by Computer, TargetAccount
+  | where FailedCount >= failure_threshold
+  | extend SourceIp = tostring(SourceIps[0])
+  | project TimeGenerated = LastFailure, FirstFailure, Computer, TargetAccount, FailedCount,
+            SourceIp, SourceIps, LogonTypes, FailureReasons
+entity_mappings:
+  - entity_type: Host
+    field_mappings:
+      - identifier: HostName
+        column_name: Computer
+  - entity_type: Account
+    field_mappings:
+      - identifier: Name
+        column_name: TargetAccount
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: SourceIp
+custom_details:
+  FailedCount: FailedCount
+  LogonTypes: LogonTypes
+  FailureReasons: FailureReasons
+simulation: simulate/scenarios/win-sim-chain.sh
+false_positives:
+  - Services or scheduled tasks running with an expired password (very regular cadence, single source).
+references:
+  - https://attack.mitre.org/techniques/T1110/001/
+  - https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4625
