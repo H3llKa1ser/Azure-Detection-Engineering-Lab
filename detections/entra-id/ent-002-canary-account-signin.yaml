@@ -1,0 +1,50 @@
+id: ENT-002
+name: Sign-in attempt against an Entra ID honeytoken account
+description: |
+  Someone tried to sign in as one of the lab's canary accounts. These are
+  disabled accounts with high-value-sounding names that nothing legitimate
+  uses, listed in the "${canary_watchlist_alias}" watchlist. Any attempt -
+  successful or not - means the account name was harvested (directory
+  enumeration, user-list spraying, leaked credential testing).
+severity: High
+requires: [entra_id]
+tactics: [InitialAccess, CredentialAccess]
+techniques: [T1078, T1110]
+sub_techniques: [T1078.004]
+query_frequency: PT10M
+query_period: PT1H
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  let canaries = _GetWatchlist("${canary_watchlist_alias}") | project tolower(tostring(SearchKey));
+  union isfuzzy=true SigninLogs, AADNonInteractiveUserSignInLogs
+  | extend Upn = tolower(UserPrincipalName)
+  | where Upn in (canaries)
+  | summarize Attempts = count(), Successes = countif(ResultType == "0"),
+              ResultCodes = make_set(ResultType), ResultDescriptions = make_set(ResultDescription, 5),
+              Apps = make_set(AppDisplayName, 5), UserAgents = make_set(UserAgent, 5),
+              FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+              by Upn, UserId, IPAddress, Location
+  | project TimeGenerated = LastSeen, FirstSeen, Upn, UserId, IPAddress, Location, Attempts,
+            Successes, ResultCodes, ResultDescriptions, Apps, UserAgents
+entity_mappings:
+  - entity_type: Account
+    field_mappings:
+      - identifier: FullName
+        column_name: Upn
+      - identifier: AadUserId
+        column_name: UserId
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: IPAddress
+custom_details:
+  Attempts: Attempts
+  ResultCodes: ResultCodes
+  Apps: Apps
+  UserAgents: UserAgents
+simulation: simulate/scenarios/ent-002-canary-account-signin.sh
+false_positives:
+  - None expected. An admin opening the canary in the portal does not create a sign-in for it.
+references:
+  - https://attack.mitre.org/techniques/T1078/004/
