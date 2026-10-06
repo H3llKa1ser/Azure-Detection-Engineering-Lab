@@ -3,11 +3,12 @@
 [![ci](https://github.com/H3llKa1ser/Azure-Detection-Engineering-Lab/actions/workflows/ci.yml/badge.svg)](https://github.com/H3llKa1ser/Azure-Detection-Engineering-Lab/actions/workflows/ci.yml)
 ![Terraform](https://img.shields.io/badge/terraform-%E2%89%A51.9-7B42BC)
 ![azurerm](https://img.shields.io/badge/azurerm-5.x-0078D4)
-![Detections](https://img.shields.io/badge/detections-14-success)
+![Detections](https://img.shields.io/badge/detections-21-success)
 
 A blue-team lab on Azure, built entirely with Terraform: Microsoft Sentinel,
-instrumented victim hosts, honeytokens, **detections as code**, and an attack
-simulation harness that proves every rule actually fires.
+instrumented victim hosts, Entra ID identity telemetry, honeytokens,
+**detections as code**, and an attack simulation harness that proves every
+rule actually fires.
 
 The loop this repo is built around:
 
@@ -38,9 +39,14 @@ flowchart LR
             ST[Storage<br/>canary blob]
             NSGSIM[Unattached NSG<br/>simulation target]
             LAW[(Log Analytics)]
-            SEN[Microsoft Sentinel<br/>14 analytics rules<br/>watchlist + automation]
+            SEN[Microsoft Sentinel<br/>up to 21 analytics rules<br/>watchlists + automation]
         end
     end
+    subgraph ENTRA[Entra ID tenant - optional]
+        SIGN[Sign-in + audit logs<br/>risk logs with P2]
+        CAN[Disabled canary accounts<br/>sim app + sim user]
+    end
+    SIGN -- SigninLogs / AuditLogs --> LAW
     WIN -- SecurityEvent via DCR --> LAW
     LNX -- Syslog auth/authpriv via DCR --> LAW
     KV -- AuditEvent --> LAW
@@ -53,11 +59,11 @@ flowchart LR
 | Layer | What's deployed |
 |---|---|
 | SIEM | Log Analytics workspace (daily cap), Sentinel onboarding |
-| Telemetry | Subscription Activity Log, Key Vault audit, Blob read/write/delete logs, Windows Security events and Linux auth syslog via Azure Monitor Agent + Data Collection Rules |
+| Telemetry | Subscription Activity Log, Key Vault audit, Blob read/write/delete logs, Windows Security events and Linux auth syslog via Azure Monitor Agent + Data Collection Rules, and optionally Entra ID sign-in, audit and risk logs |
 | Victims | Windows Server 2022 and Ubuntu 24.04, Trusted Launch, no public IPs, nightly auto-shutdown |
-| Deception | Canary Key Vault secret, decoy secrets, canary "payroll export" blob |
-| Detections | 14 scheduled analytics rules generated from YAML, mapped to MITRE ATT&CK, with entity mappings and custom details |
-| Response | Watchlist allowlist, automation rule that labels every incident and attaches a triage task checklist |
+| Deception | Canary Key Vault secret, decoy secrets, canary "payroll export" blob, and (Entra layer) disabled canary user accounts |
+| Detections | 21 scheduled analytics rules generated from YAML (14 core + 7 identity), mapped to MITRE ATT&CK, with entity mappings, custom details and dynamic severity |
+| Response | Allowlist and honeytoken watchlists, automation rule that labels every incident and attaches a triage task checklist |
 | Simulation | Bash + az CLI scenarios, Windows/Linux attack chains via Run Command, `verify.sh` closes the loop |
 
 ## Detections
@@ -80,6 +86,17 @@ Full catalog with ATT&CK links: [`docs/detection-catalog.md`](docs/detection-cat
 | WIN-004 | Security event log cleared | High | T1070.001 |
 | LNX-001 | SSH auth failure burst from one source | Medium | T1110.001, T1110.003 |
 | LNX-002 | User added to root-equivalent group (sudo/wheel/docker/lxd) | Medium | T1136.001, T1098 |
+| ENT-001 | Password spray from a single IP (High if a sprayed account then signed in) | Med/High | T1110.003 |
+| ENT-002 | Sign-in attempt against a honeytoken account | High | T1078.004 |
+| ENT-003 | Credential added to app / service principal | Medium | T1098.001 |
+| ENT-004 | Privileged Entra directory role assigned (incl. PIM) | High | T1098.003 |
+| ENT-005 | Conditional Access policy changed (High on delete/disable) | Low-High | T1556.009 |
+| ENT-006 | High-risk Graph permission granted to an app | High | T1528, T1098.003 |
+| ENT-007 | Identity Protection medium/high risk (P2) | Med/High | T1078.004 |
+
+The ENT rules are deployed only with `enable_entra_id = true` (ENT-007 also needs
+`entra_id_p2 = true`). Prerequisites, required roles and simulation safety tiers
+are in [`docs/entra-id.md`](docs/entra-id.md).
 
 ## Quick start
 
@@ -106,6 +123,14 @@ Give the agents ~10 minutes to start shipping, then:
 make simulate      # runs every scenario (~5 min)
 # wait ~20-30 min for ingestion + rule schedules
 make verify        # FIRED / MISSING per detection
+```
+
+To add the identity layer, set `enable_entra_id = true` (and `entra_id_p2 = true`
+on a P2 tenant) and re-apply; see [`docs/entra-id.md`](docs/entra-id.md) first.
+The scenarios that temporarily change tenant objects only run when you opt in:
+
+```bash
+ALLOW_TENANT_CHANGES=1 make simulate
 ```
 
 Incidents appear in Sentinel (Azure portal, or the Defender portal if your tenant uses
@@ -136,7 +161,7 @@ picks up every YAML file and turns it into a Sentinel rule, skipping any whose
 |---|---|
 | `scripts/validate_detections.py` | Schema, duplicate IDs, Sentinel limits (frequency/period bounds, entity and field-mapping counts), valid tactic names, ATT&CK ID formats, entity/custom-detail columns that don't exist in the query, missing simulation scripts, stale catalog |
 | `scripts/kql/check.js` | **KQL syntax and semantic analysis** using Microsoft's `Kusto.Language` library against a declared table schema: unknown tables/columns, columns referenced after a `summarize` dropped them, type errors |
-| `terraform test` | Offline plan tests with mocked providers: all 14 rules plan, host rules are skipped without VMs, firewalls default-deny, variable validation |
+| `terraform test` | Offline plan tests with mocked providers: correct rule counts for every data-source combination (14 / 8 / 20 / 21), canary accounts disabled and on the watchlist, no tenant resources unless opted in, P2 log categories only with P2, firewalls default-deny, variable validation |
 | `terraform fmt` / `validate`, `tflint` (+ azurerm ruleset) | Style, schema, retired VM sizes, invalid SKUs |
 | Checkov | IaC misconfigurations; every skip is inline with a written justification |
 | ShellCheck | Simulation scripts |
@@ -177,6 +202,18 @@ fires on the Terraform-managed audit baseline and on every host simulation. That
 realistic: high-value control-plane rules need a baseline of known callers before they
 go to production, which is what the watchlist pattern in AZ-ACT-001 demonstrates.
 
+**Identity simulations get blast-radius tiers.** Sign-in scenarios only throw
+random wrong passwords at *disabled* canary accounts. Anything that changes the
+tenant (a secret, a role, a CA policy, an app permission) needs
+`ALLOW_TENANT_CHANGES=1`, targets only lab-owned disabled or credential-less
+objects, and reverts itself within ~30 s.
+
+**One rule, different urgencies.** A Conditional Access policy being created and
+one being deleted are the same detection but not the same page. ENT-005 computes
+an `AlertSeverity` column and the loader wires it to Sentinel's
+`alert_details_override`, which the validator checks (the column must exist, and
+custom alert names must keep the `[ID]` prefix `verify.sh` relies on).
+
 **azurerm 5.x changes.** The provider no longer auto-registers ~60 resource providers;
 this lab registers exactly the 10 it needs. Key Vault now requires
 `rbac_authorization_enabled`, and tflint's azurerm ruleset flagged the B-series v1
@@ -213,13 +250,14 @@ cloud-only lab (8 detections: Activity Log, Key Vault, Storage).
 | No `SecurityEvent`/`Syslog` data | Check the AMA extension status on the VM and that the subnet has egress; set `use_nat_gateway = true` if default outbound access isn't available in your subscription |
 | `verify.sh` shows MISSING | Check ingestion first (`AzureDiagnostics \| take 1`, `SecurityEvent \| take 1`), then the rule's health in Sentinel > Analytics. Host rules show MISSING if that VM isn't deployed |
 | Role-assignment scenario fails | Your account needs Owner or User Access Administrator on the lab resource group |
+| ENT-003..006 show MISSING | They only run with `ALLOW_TENANT_CHANGES=1`; a 403 from Graph means the CLI token or your Entra role is insufficient (see [`docs/entra-id.md`](docs/entra-id.md)) |
 
 ## Repo layout
 
 ```
 .
 ├── detections/                 # detection-as-code: one YAML per rule
-│   ├── azure-activity/  keyvault/  storage/  windows/  linux/
+│   ├── azure-activity/  keyvault/  storage/  windows/  linux/  entra-id/
 │   └── _TEMPLATE.yaml.example
 ├── simulate/
 │   ├── scenarios/              # one script per detection (or chain)
@@ -230,6 +268,7 @@ cloud-only lab (8 detections: Activity Log, Key Vault, Storage).
 │   ├── monitoring.tf           # Log Analytics, Sentinel, Activity Log
 │   ├── network.tf  compute.tf  dcr.tf
 │   ├── canaries.tf             # Key Vault, Storage, honeytoken seeding
+│   ├── entra.tf                # Entra ID logs, canary accounts, sim targets
 │   ├── detections.tf           # YAML -> Sentinel rule loader
 │   ├── sentinel.tf             # watchlist, automation rule
 │   ├── tests/plan.tftest.hcl   # offline plan tests
@@ -237,13 +276,15 @@ cloud-only lab (8 detections: Activity Log, Key Vault, Storage).
 ├── scripts/
 │   ├── validate_detections.py  # lint + catalog generator
 │   └── kql/                    # Kusto.Language semantic checker + schema
-├── docs/detection-catalog.md   # generated
+├── docs/
+│   ├── detection-catalog.md    # generated
+│   └── entra-id.md             # identity layer: prerequisites, roles, safety
 └── .github/workflows/ci.yml
 ```
 
 ## Roadmap
 
-- [ ] Entra ID sign-in/audit logs (requires P1/P2) and identity detections
+- [x] Entra ID sign-in/audit/risk logs and identity detections ([docs](docs/entra-id.md))
 - [ ] VNet flow logs + Traffic Analytics, network detections
 - [ ] Logic App playbook: auto-disable principal on KV-001 / STG-001
 - [ ] Sysmon on the Windows host
