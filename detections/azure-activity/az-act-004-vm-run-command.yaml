@@ -1,0 +1,51 @@
+id: AZ-ACT-004
+name: VM Run Command executed
+description: |
+  Code was executed on a virtual machine through the Azure control plane
+  (Run Command / managed Run Command). This needs only Azure RBAC - no
+  network path, no credentials for the guest OS - and runs as SYSTEM/root.
+  It's how this lab drives its own simulations, which makes it a good
+  example of a rule that is high-value but needs a known-good baseline.
+severity: Medium
+requires: [azure_activity]
+tactics: [Execution, LateralMovement]
+techniques: [T1651]
+query_frequency: PT10M
+query_period: PT1H
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  AzureActivity
+  | where OperationNameValue in~ (
+      "MICROSOFT.COMPUTE/VIRTUALMACHINES/RUNCOMMAND/ACTION",
+      "MICROSOFT.COMPUTE/VIRTUALMACHINES/RUNCOMMANDS/WRITE")
+  | summarize TimeGenerated = max(TimeGenerated), Statuses = make_set(ActivityStatusValue),
+              Caller = take_any(Caller), CallerIpAddress = take_any(CallerIpAddress),
+              Operation = take_any(OperationNameValue), ResourceId = take_any(_ResourceId)
+              by CorrelationId
+  | where Statuses has_any ("Success", "Succeeded", "Accepted")
+  | extend VmResourceId = extract(@"(?i)^(.*/virtualmachines/[^/]+)", 1, ResourceId),
+           VmName       = extract(@"(?i)/virtualmachines/([^/]+)", 1, ResourceId)
+  | project TimeGenerated, Caller, CallerIpAddress, VmName, VmResourceId, Operation, CorrelationId
+entity_mappings:
+  - entity_type: Account
+    field_mappings:
+      - identifier: FullName
+        column_name: Caller
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: CallerIpAddress
+  - entity_type: AzureResource
+    field_mappings:
+      - identifier: ResourceId
+        column_name: VmResourceId
+custom_details:
+  VmName: VmName
+  Operation: Operation
+simulation: simulate/scenarios/win-sim-chain.sh
+false_positives:
+  - This lab's own simulations and the audit-baseline managed Run Command applied by Terraform.
+  - Patch/config tooling that uses Run Command. Baseline callers and allowlist them.
+references:
+  - https://attack.mitre.org/techniques/T1651/
