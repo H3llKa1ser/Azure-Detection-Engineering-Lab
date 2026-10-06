@@ -1,0 +1,62 @@
+id: ENT-006
+name: High-risk Microsoft Graph permission granted to an application
+description: |
+  An application was granted (by user or admin consent, or by a direct
+  app-role assignment) a Graph permission that enables mailbox, file or
+  directory takeover - Mail.Read, Files.ReadWrite.All,
+  RoleManagement.ReadWrite.Directory and similar. Covers illicit consent
+  grant phishing and attackers granting their own persistence app access.
+severity: High
+requires: [entra_id]
+tactics: [CredentialAccess, Persistence]
+techniques: [T1528, T1098]
+sub_techniques: [T1098.003]
+query_frequency: PT15M
+query_period: PT1H
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  let high_risk_scopes = @"(?i)\b((?:Mail\.(?:Read|ReadWrite|Send)|MailboxSettings\.ReadWrite|Files\.(?:Read|ReadWrite)\.All|Sites\.(?:Read|ReadWrite|FullControl)\.All|Directory\.ReadWrite\.All|RoleManagement\.ReadWrite\.Directory|AppRoleAssignment\.ReadWrite\.All|Application\.ReadWrite\.All|User\.ReadWrite\.All|Chat\.Read\.All|Notes\.Read\.All|full_access_as_app))\b";
+  AuditLogs
+  | where OperationName in~ ("Consent to application", "Add delegated permission grant",
+                             "Add app role assignment to service principal")
+  | where Result =~ "success"
+  | extend Serialized = tostring(TargetResources)
+  | extend Permissions = extract_all(high_risk_scopes, Serialized)
+  | where array_length(Permissions) > 0
+  | extend IsAdminConsent = Serialized contains "IsAdminConsent" and Serialized matches regex @"IsAdminConsent[^}]{0,80}True"
+  | extend TargetApp = tostring(TargetResources[0].displayName), TargetAppId = tostring(TargetResources[0].id)
+  | extend InitiatorUpn = tostring(InitiatedBy.user.userPrincipalName),
+           InitiatorApp = tostring(InitiatedBy.app.displayName),
+           InitiatorIp  = tostring(InitiatedBy.user.ipAddress)
+  | extend Initiator = coalesce(InitiatorUpn, InitiatorApp)
+  | summarize TimeGenerated = max(TimeGenerated), Permissions = make_set(Permissions),
+              Operations = make_set(OperationName), IsAdminConsent = max(toint(IsAdminConsent)),
+              Initiator = take_any(Initiator), InitiatorUpn = take_any(InitiatorUpn),
+              InitiatorIp = take_any(InitiatorIp), TargetApp = take_any(TargetApp)
+              by CorrelationId, TargetAppId
+  | project TimeGenerated, TargetApp, TargetAppId, Permissions, Operations, IsAdminConsent,
+            Initiator, InitiatorUpn, InitiatorIp, CorrelationId
+entity_mappings:
+  - entity_type: Account
+    field_mappings:
+      - identifier: FullName
+        column_name: InitiatorUpn
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: InitiatorIp
+  - entity_type: CloudApplication
+    field_mappings:
+      - identifier: Name
+        column_name: TargetApp
+custom_details:
+  Permissions: Permissions
+  IsAdminConsent: IsAdminConsent
+  Operations: Operations
+simulation: simulate/scenarios/ent-006-high-risk-consent.sh
+false_positives:
+  - Onboarding of legitimate backup, e-discovery or migration tools - verify the publisher and allowlist by app ID.
+references:
+  - https://attack.mitre.org/techniques/T1528/
+  - https://learn.microsoft.com/defender-office-365/detect-and-remediate-illicit-consent-grants
