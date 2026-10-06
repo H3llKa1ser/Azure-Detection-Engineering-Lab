@@ -1,0 +1,60 @@
+id: ENT-005
+name: Conditional Access policy created, modified or deleted
+description: |
+  A Conditional Access policy changed. CA is where MFA, device compliance
+  and location controls are enforced, so weakening it (deleting a policy,
+  setting it to disabled or report-only, adding exclusions) is how an
+  attacker with admin rights quietly removes the guardrails. Deletions and
+  changes that disable a policy are raised to High.
+severity: Medium
+requires: [entra_id]
+tactics: [DefenseEvasion, Persistence]
+techniques: [T1556]
+sub_techniques: [T1556.009]
+query_frequency: PT15M
+query_period: PT1H
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  AuditLogs
+  | where OperationName in~ ("Add conditional access policy", "Update conditional access policy",
+                             "Delete conditional access policy")
+  | where Result =~ "success"
+  | extend PolicyName = tostring(TargetResources[0].displayName),
+           PolicyId   = tostring(TargetResources[0].id),
+           Changes    = tostring(TargetResources[0].modifiedProperties)
+  | extend Action = case(OperationName has "Delete", "Deleted", OperationName has "Update", "Updated", "Created")
+  // newValue is an escaped JSON string, so quotes may be backslash-escaped.
+  | extend NewState = extract(@"\\?""state\\?""\s*:\s*\\?""(\w+)", 1, Changes)
+  | extend AlertSeverity = case(
+        Action == "Deleted", "High",
+        Action == "Updated" and NewState in~ ("disabled", "enabledForReportingButNotEnforced"), "High",
+        Action == "Updated", "Medium",
+        "Low")
+  | extend InitiatorUpn = tostring(InitiatedBy.user.userPrincipalName),
+           InitiatorApp = tostring(InitiatedBy.app.displayName),
+           InitiatorIp  = tostring(InitiatedBy.user.ipAddress)
+  | extend Initiator = coalesce(InitiatorUpn, InitiatorApp)
+  | project TimeGenerated, Action, PolicyName, PolicyId, NewState, Initiator, InitiatorUpn, InitiatorIp,
+            AlertSeverity, CorrelationId
+entity_mappings:
+  - entity_type: Account
+    field_mappings:
+      - identifier: FullName
+        column_name: InitiatorUpn
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: InitiatorIp
+custom_details:
+  Action: Action
+  PolicyName: PolicyName
+  NewState: NewState
+alert_details_override:
+  display_name_format: "[ENT-005] Conditional Access policy {{Action}}: {{PolicyName}}"
+  severity_column_name: AlertSeverity
+simulation: simulate/scenarios/ent-005-conditional-access-change.sh
+false_positives:
+  - Planned CA changes. Pair with change management; changes made through a CA-as-code pipeline identity can be allowlisted.
+references:
+  - https://attack.mitre.org/techniques/T1556/009/
