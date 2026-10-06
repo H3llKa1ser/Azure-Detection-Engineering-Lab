@@ -1,0 +1,47 @@
+id: AZ-ACT-005
+name: Storage account keys listed by a user
+description: |
+  A user identity retrieved storage account access keys. Account keys grant
+  full data-plane access and bypass Entra ID auditing of who read what, so
+  key listing by humans is worth a look even when shared-key auth is off.
+severity: Low
+requires: [azure_activity]
+tactics: [CredentialAccess]
+techniques: [T1552]
+sub_techniques: [T1552.007]
+query_frequency: PT10M
+query_period: PT1H
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  AzureActivity
+  | where OperationNameValue =~ "MICROSOFT.STORAGE/STORAGEACCOUNTS/LISTKEYS/ACTION"
+  | where ActivityStatusValue in~ ("Success", "Succeeded")
+  // Users show up as UPNs; service principals and managed identities as GUIDs.
+  | where Caller has "@"
+  | summarize TimeGenerated = max(TimeGenerated), Count = count(),
+              CallerIpAddress = take_any(CallerIpAddress)
+              by Caller, StorageAccountId = _ResourceId
+  | extend StorageAccount = tostring(split(StorageAccountId, "/")[-1])
+  | project TimeGenerated, Caller, CallerIpAddress, StorageAccount, StorageAccountId, Count
+entity_mappings:
+  - entity_type: Account
+    field_mappings:
+      - identifier: FullName
+        column_name: Caller
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: CallerIpAddress
+  - entity_type: AzureResource
+    field_mappings:
+      - identifier: ResourceId
+        column_name: StorageAccountId
+custom_details:
+  StorageAccount: StorageAccount
+simulation: simulate/scenarios/az-act-005-storage-listkeys.sh
+false_positives:
+  - Opening some storage blades in the Azure portal calls listKeys.
+  - Legacy tooling (Storage Explorer with key auth).
+references:
+  - https://attack.mitre.org/techniques/T1552/
