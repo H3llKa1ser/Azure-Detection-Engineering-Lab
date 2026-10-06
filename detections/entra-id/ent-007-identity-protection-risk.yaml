@@ -1,0 +1,63 @@
+id: ENT-007
+name: Entra ID Protection - high or medium risk sign-in or user risk
+description: |
+  Entra ID Protection (P2) flagged a sign-in or user as medium/high risk
+  (anonymous IP, impossible travel, unfamiliar properties, leaked
+  credentials, token anomalies, ...). Raising these as Sentinel incidents
+  puts Microsoft's identity ML next to your own telemetry for correlation.
+  Severity follows the highest risk level observed.
+severity: Medium
+requires: [entra_id, entra_id_p2]
+tactics: [InitialAccess, CredentialAccess]
+techniques: [T1078]
+sub_techniques: [T1078.004]
+query_frequency: PT15M
+query_period: PT1H
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  let risky_signins = union isfuzzy=true SigninLogs, AADNonInteractiveUserSignInLogs
+      | where RiskLevelDuringSignIn in~ ("medium", "high") or RiskLevelAggregated in~ ("medium", "high")
+      | project TimeGenerated, UserPrincipalName, UserId, IPAddress, Location,
+                RiskLevel = iff(RiskLevelDuringSignIn =~ "high" or RiskLevelAggregated =~ "high", "high", "medium"),
+                RiskTypes = RiskEventTypes_V2, Source = "SignIn", ResultType;
+  let risk_detections = AADUserRiskEvents
+      | where RiskLevel in~ ("medium", "high")
+      | project TimeGenerated, UserPrincipalName, UserId, IPAddress = IpAddress,
+                Location = tostring(Location.countryOrRegion), RiskLevel = tolower(RiskLevel),
+                RiskTypes = RiskEventType, Source = "RiskDetection", ResultType = "";
+  union risky_signins, risk_detections
+  | summarize TimeGenerated = max(TimeGenerated), Events = count(),
+              MaxRisk = iff(countif(RiskLevel == "high") > 0, "high", "medium"),
+              RiskTypes = make_set(RiskTypes, 10), Sources = make_set(Source),
+              IPAddresses = make_set(IPAddress, 10), Locations = make_set(Location, 10),
+              SuccessfulSignIns = countif(ResultType == "0")
+              by UserPrincipalName, UserId
+  | extend IPAddress = tostring(IPAddresses[0]),
+           AlertSeverity = iff(MaxRisk == "high", "High", "Medium")
+  | project TimeGenerated, UserPrincipalName, UserId, MaxRisk, RiskTypes, Sources, Events,
+            SuccessfulSignIns, IPAddress, IPAddresses, Locations, AlertSeverity
+entity_mappings:
+  - entity_type: Account
+    field_mappings:
+      - identifier: FullName
+        column_name: UserPrincipalName
+      - identifier: AadUserId
+        column_name: UserId
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: IPAddress
+custom_details:
+  MaxRisk: MaxRisk
+  RiskTypes: RiskTypes
+  SuccessfulSignIns: SuccessfulSignIns
+alert_details_override:
+  display_name_format: "[ENT-007] Identity Protection {{MaxRisk}} risk for {{UserPrincipalName}}"
+  severity_column_name: AlertSeverity
+simulation: simulate/scenarios/ent-007-identity-protection-risk.sh
+false_positives:
+  - Users on VPNs or travelling. Tune with named locations and by confirming risk in Identity Protection.
+references:
+  - https://attack.mitre.org/techniques/T1078/004/
+  - https://learn.microsoft.com/entra/id-protection/howto-identity-protection-simulate-risk
