@@ -1,0 +1,56 @@
+id: WIN-002
+name: Successful logon after repeated failures (brute force success)
+description: |
+  An account accumulated repeated failed logons (4625) on a host and then
+  logged on successfully (4624). Correlating the two turns a noisy signal
+  into a high-confidence "the guessing worked" alert.
+severity: High
+requires: [windows_vm]
+tactics: [CredentialAccess, InitialAccess]
+techniques: [T1110, T1078]
+sub_techniques: [T1110.001, T1078.003]
+query_frequency: PT10M
+query_period: PT1H
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  let failure_threshold = 10;
+  let failures = SecurityEvent
+      | where EventID == 4625
+      | summarize FailedCount = count(), FirstFailure = min(TimeGenerated),
+                  LastFailure = max(TimeGenerated), FailedFrom = make_set(IpAddress, 20)
+                  by Computer, TargetAccount = tolower(TargetUserName)
+      | where FailedCount >= failure_threshold;
+  let successes = SecurityEvent
+      | where EventID == 4624
+      | where LogonType in (2, 3, 7, 8, 10, 11)
+      | summarize FirstSuccessAfter = min(TimeGenerated), LastSuccess = max(TimeGenerated),
+                  SuccessLogonTypes = make_set(LogonType), SuccessFrom = make_set(IpAddress, 10)
+                  by Computer, TargetAccount = tolower(TargetUserName);
+  failures
+  | join kind=inner successes on Computer, TargetAccount
+  | where LastSuccess >= FirstFailure
+  | extend SourceIp = tostring(SuccessFrom[0])
+  | project TimeGenerated = LastSuccess, Computer, TargetAccount, FailedCount, FirstFailure,
+            LastFailure, LastSuccess, SourceIp, FailedFrom, SuccessLogonTypes
+entity_mappings:
+  - entity_type: Host
+    field_mappings:
+      - identifier: HostName
+        column_name: Computer
+  - entity_type: Account
+    field_mappings:
+      - identifier: Name
+        column_name: TargetAccount
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: SourceIp
+custom_details:
+  FailedCount: FailedCount
+  SuccessLogonTypes: SuccessLogonTypes
+simulation: simulate/scenarios/win-sim-chain.sh
+false_positives:
+  - A user who fat-fingers their password many times and then gets it right (rare at threshold 10).
+references:
+  - https://attack.mitre.org/techniques/T1110/
