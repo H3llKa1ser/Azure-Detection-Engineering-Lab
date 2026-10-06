@@ -1,0 +1,19 @@
+# Copy to terraform.tfvars and fill in.
+subscription_id = "00000000-0000-0000-0000-000000000000"
+
+location = "westeurope"
+prefix   = "detlab"
+
+# Leave unset to auto-detect via api.ipify.org
+# operator_ip = "203.0.113.10"
+
+deploy_windows_vm = true
+deploy_linux_vm   = true
+
+auto_shutdown_time     = "1900"
+auto_shutdown_timezone = "W. Europe Standard Time"
+
+daily_quota_gb = 1
+
+# Break-glass accounts / CI service principals. Do NOT add yourself.
+approved_privileged_callers = []
