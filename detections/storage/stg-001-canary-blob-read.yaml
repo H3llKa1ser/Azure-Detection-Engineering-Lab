@@ -1,0 +1,52 @@
+id: STG-001
+name: Honeytoken blob downloaded
+description: |
+  The canary blob "${canary_blob_name}" in storage account
+  "${storage_name}" was downloaded. The file looks like a payroll export
+  and is referenced by nothing - reading it indicates data discovery or
+  collection by someone browsing the account.
+severity: High
+requires: [storage]
+tactics: [Collection, Exfiltration]
+techniques: [T1530]
+query_frequency: PT5M
+query_period: PT1H
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  StorageBlobLogs
+  | where AccountName =~ "${storage_name}"
+  | where OperationName in ("GetBlob", "CopyBlob", "CopyBlobSource")
+  | where Uri contains "${canary_blob_leaf}"
+  | extend ClientIp = tostring(split(CallerIpAddress, ":")[0]),
+           Actor = coalesce(RequesterUpn, RequesterObjectId, RequesterAppId, AuthenticationType)
+  | summarize TimeGenerated = max(TimeGenerated), Downloads = count(),
+              StatusCodes = make_set(StatusCode), UserAgents = make_set(UserAgentHeader, 5),
+              AuthTypes = make_set(AuthenticationType)
+              by Actor, RequesterUpn, RequesterObjectId, ClientIp, StorageAccountId = _ResourceId
+  | project TimeGenerated, Actor, RequesterUpn, RequesterObjectId, ClientIp, StorageAccountId,
+            Downloads, StatusCodes, AuthTypes, UserAgents
+entity_mappings:
+  - entity_type: Account
+    field_mappings:
+      - identifier: FullName
+        column_name: RequesterUpn
+      - identifier: AadUserId
+        column_name: RequesterObjectId
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: ClientIp
+  - entity_type: AzureResource
+    field_mappings:
+      - identifier: ResourceId
+        column_name: StorageAccountId
+custom_details:
+  Downloads: Downloads
+  AuthTypes: AuthTypes
+  UserAgents: UserAgents
+simulation: simulate/scenarios/stg-001-canary-blob-read.sh
+false_positives:
+  - Antimalware scanning for Storage (Defender) can read blobs - its requests carry a distinct identity.
+references:
+  - https://attack.mitre.org/techniques/T1530/
