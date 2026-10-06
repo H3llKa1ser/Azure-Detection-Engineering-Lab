@@ -1,0 +1,34 @@
+# Copy to detections/<area>/<id-lowercase>-<slug>.yaml
+# Placeholders available in description/query: ${canary_secret_name},
+# ${canary_blob_name}, ${canary_blob_leaf}, ${key_vault_name}, ${storage_name},
+# ${watchlist_alias}
+id: ABC-001
+name: Short human-readable name
+description: |
+  What it detects, why an attacker does it, why it matters.
+severity: Medium            # Informational | Low | Medium | High
+requires: [azure_activity]  # azure_activity | key_vault | storage | windows_vm | linux_vm
+tactics: [DefenseEvasion]   # Sentinel tactic names (no spaces)
+techniques: [T1562]         # parent technique IDs only
+sub_techniques: [T1562.008] # optional, documentation + catalog
+query_frequency: PT10M      # >= PT5M
+query_period: PT1H          # >= frequency, <= P14D
+trigger_operator: GreaterThan
+trigger_threshold: 0
+# suppression_duration: PT1H   # optional
+# grouping_lookback: PT5H      # optional, default PT5H
+query: |
+  AzureActivity
+  | where OperationNameValue =~ "..."
+  | project TimeGenerated, Caller, CallerIpAddress
+entity_mappings:
+  - entity_type: Account
+    field_mappings:
+      - identifier: FullName
+        column_name: Caller
+custom_details: {}
+simulation: simulate/scenarios/<script>.sh
+false_positives:
+  - ...
+references:
+  - https://attack.mitre.org/techniques/T1562/008/
