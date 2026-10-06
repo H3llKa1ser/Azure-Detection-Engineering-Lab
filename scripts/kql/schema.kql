@@ -1,0 +1,33 @@
+// Subset of the Log Analytics / Sentinel schema used by the detections.
+// Prepended to every query by check.js so the Kusto analyzer can resolve
+// tables, columns and types. Extend this when a rule uses a new column.
+// Column names/types follow the Azure Monitor table reference.
+let AzureActivity = datatable(
+    TimeGenerated:datetime, OperationNameValue:string, OperationName:string,
+    ActivityStatusValue:string, ActivitySubstatusValue:string, CategoryValue:string,
+    Caller:string, CallerIpAddress:string, CorrelationId:string, Properties_d:dynamic,
+    Authorization_d:dynamic, Claims_d:dynamic, ResourceGroup:string, SubscriptionId:string,
+    ResourceProviderValue:string, _ResourceId:string, Level:string)[];
+let AzureDiagnostics = datatable(
+    TimeGenerated:datetime, ResourceProvider:string, ResourceType:string, Category:string,
+    OperationName:string, Resource:string, ResourceGroup:string, ResultType:string,
+    ResultSignature:string, CallerIPAddress:string, _ResourceId:string)[];
+let StorageBlobLogs = datatable(
+    TimeGenerated:datetime, AccountName:string, OperationName:string, Uri:string,
+    CallerIpAddress:string, AuthenticationType:string, RequesterUpn:string,
+    RequesterObjectId:string, RequesterAppId:string, RequesterTenantId:string,
+    StatusCode:string, StatusText:string, UserAgentHeader:string, ObjectKey:string,
+    _ResourceId:string)[];
+let SecurityEvent = datatable(
+    TimeGenerated:datetime, Computer:string, EventID:int, Activity:string, Account:string,
+    AccountType:string, TargetUserName:string, TargetDomainName:string, TargetSid:string,
+    SubjectUserName:string, SubjectDomainName:string, SubjectUserSid:string,
+    IpAddress:string, LogonType:int, LogonProcessName:string, AuthenticationPackageName:string,
+    Status:string, SubStatus:string, MemberName:string, MemberSid:string,
+    NewProcessName:string, CommandLine:string, ParentProcessName:string, EventData:string,
+    _ResourceId:string)[];
+let Syslog = datatable(
+    TimeGenerated:datetime, Computer:string, HostIP:string, HostName:string, Facility:string,
+    SeverityLevel:string, ProcessName:string, ProcessID:int, SyslogMessage:string,
+    _ResourceId:string)[];
+let _GetWatchlist = (watchlistAlias:string) { datatable(SearchKey:string, Caller:string, Reason:string)[] };
