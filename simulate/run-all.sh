@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 # Run every scenario, then tell you when to run verify.sh.
+#
+#   ./simulate/run-all.sh                     # Azure + host + Entra sign-in scenarios
+#   ALLOW_TENANT_CHANGES=1 ./simulate/run-all.sh
+#                                             # also ENT-003..006, which make
+#                                             # temporary, self-reverting changes
+#                                             # to the Entra ID tenant
 # shellcheck source=lib/common.sh
 source "$(dirname "$0")/lib/common.sh"
 require_env
@@ -14,6 +20,11 @@ scenarios=(
   az-act-005-storage-listkeys
   win-sim-chain
   lnx-sim-chain
+  ent-001-password-spray
+  ent-003-app-credential-added
+  ent-004-privileged-directory-role
+  ent-005-conditional-access-change
+  ent-006-high-risk-consent
 )
 
 failed=()
