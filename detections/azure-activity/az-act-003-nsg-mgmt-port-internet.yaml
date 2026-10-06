@@ -1,0 +1,70 @@
+id: AZ-ACT-003
+name: NSG rule allows management ports from the Internet
+description: |
+  An inbound Allow rule was written to a network security group with an
+  Internet-wide source (*, Internet, Any, 0.0.0.0/0) covering SSH (22), RDP
+  (3389) or WinRM (5985/5986). Often a precursor to direct access, or an
+  operator "temporarily" opening a port and forgetting about it.
+severity: Medium
+requires: [azure_activity]
+tactics: [DefenseEvasion, InitialAccess]
+techniques: [T1562, T1133]
+sub_techniques: [T1562.007]
+query_frequency: PT10M
+query_period: PT1H
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  let mgmt_ports = dynamic([22, 3389, 5985, 5986]);
+  AzureActivity
+  | where OperationNameValue =~ "MICROSOFT.NETWORK/NETWORKSECURITYGROUPS/SECURITYRULES/WRITE"
+  | extend RequestBody = tostring(Properties_d.requestbody)
+  | summarize
+      TimeGenerated   = max(TimeGenerated),
+      RequestBody     = take_anyif(RequestBody, isnotempty(RequestBody)),
+      Statuses        = make_set(ActivityStatusValue),
+      Caller          = take_any(Caller),
+      CallerIpAddress = take_any(CallerIpAddress),
+      RuleId          = take_any(_ResourceId)
+      by CorrelationId
+  | where Statuses has_any ("Success", "Succeeded")
+  | extend Rule = parse_json(RequestBody).properties
+  | where tostring(Rule.access) =~ "Allow" and tostring(Rule.direction) =~ "Inbound"
+  | extend Sources = strcat(tostring(Rule.sourceAddressPrefix), ",", tostring(Rule.sourceAddressPrefixes))
+  | where Sources matches regex @"(^|[,\[""\s])(\*|Internet|Any|0\.0\.0\.0/0)([,\]""\s]|$)"
+  | extend PortList = iff(isnotempty(tostring(Rule.destinationPortRange)),
+                          pack_array(tostring(Rule.destinationPortRange)),
+                          todynamic(tostring(Rule.destinationPortRanges)))
+  | mv-expand Port = PortList to typeof(string)
+  | extend Low  = toint(iff(Port == "*", "0",     tostring(split(Port, "-")[0]))),
+           High = toint(iff(Port == "*", "65535", tostring(split(Port, "-")[-1])))
+  | mv-expand MgmtPort = mgmt_ports to typeof(int)
+  | where MgmtPort between (Low .. High)
+  | summarize TimeGenerated = max(TimeGenerated), ExposedPorts = make_set(MgmtPort),
+              Caller = take_any(Caller), CallerIpAddress = take_any(CallerIpAddress),
+              Sources = take_any(Sources)
+              by CorrelationId, RuleId
+  | extend NsgId = tostring(split(RuleId, "/securityrules/")[0])
+  | project TimeGenerated, Caller, CallerIpAddress, NsgId, RuleId, ExposedPorts, Sources, CorrelationId
+entity_mappings:
+  - entity_type: Account
+    field_mappings:
+      - identifier: FullName
+        column_name: Caller
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: CallerIpAddress
+  - entity_type: AzureResource
+    field_mappings:
+      - identifier: ResourceId
+        column_name: NsgId
+custom_details:
+  ExposedPorts: ExposedPorts
+  RuleId: RuleId
+simulation: simulate/scenarios/az-act-003-nsg-open-rdp.sh
+false_positives:
+  - Honeypots and deliberately exposed jump hosts (scope them out by NSG ID).
+  - In production, enrich with whether the NSG is attached to anything before paging.
+references:
+  - https://attack.mitre.org/techniques/T1133/
