@@ -22,6 +22,7 @@ const VARS = {
   key_vault_name: 'kv-detlab-abcde',
   storage_name: 'stdetlababcde',
   watchlist_alias: 'LabApprovedPrivilegedCallers',
+  canary_watchlist_alias: 'LabCanaryAccounts',
 };
 const render = (s) => s.replace(/\$\{([a-z_]+)\}/g, (_, k) => {
   if (!(k in VARS)) throw new Error(`unknown template variable \${${k}}`);
