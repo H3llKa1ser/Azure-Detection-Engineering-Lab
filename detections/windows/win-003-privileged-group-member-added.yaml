@@ -1,0 +1,49 @@
+id: WIN-003
+name: Member added to a privileged Windows group
+description: |
+  An account was added to a privileged local or domain group
+  (Administrators, Remote Desktop Users, Remote Management Users, Backup
+  Operators, Domain/Enterprise/Schema Admins). Common persistence and
+  privilege-escalation step.
+severity: Medium
+requires: [windows_vm]
+tactics: [Persistence, PrivilegeEscalation]
+techniques: [T1098]
+query_frequency: PT10M
+query_period: PT30M
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  let privileged_sids = dynamic(["S-1-5-32-544", "S-1-5-32-555", "S-1-5-32-580", "S-1-5-32-551"]);
+  let privileged_names = dynamic(["Administrators", "Remote Desktop Users", "Remote Management Users",
+                                  "Backup Operators", "Domain Admins", "Enterprise Admins", "Schema Admins"]);
+  SecurityEvent
+  | where EventID in (4728, 4732, 4756)
+  | where TargetSid in (privileged_sids) or TargetUserName in~ (privileged_names)
+  | extend Actor = strcat(SubjectDomainName, "\\", SubjectUserName),
+           MemberAccount = iff(isnotempty(MemberName) and MemberName != "-", MemberName, MemberSid)
+  | project TimeGenerated, Computer, Actor, SubjectUserName, Group = TargetUserName, GroupSid = TargetSid,
+            MemberAccount, MemberSid, EventID
+entity_mappings:
+  - entity_type: Host
+    field_mappings:
+      - identifier: HostName
+        column_name: Computer
+  - entity_type: Account
+    field_mappings:
+      - identifier: Name
+        column_name: SubjectUserName
+  - entity_type: Account
+    field_mappings:
+      - identifier: Sid
+        column_name: MemberSid
+custom_details:
+  Group: Group
+  Actor: Actor
+  MemberAccount: MemberAccount
+simulation: simulate/scenarios/win-sim-chain.sh
+false_positives:
+  - Provisioning scripts and LAPS-style tooling during build. Baseline during image creation.
+references:
+  - https://attack.mitre.org/techniques/T1098/
+  - https://learn.microsoft.com/windows/security/threat-protection/auditing/event-4732
