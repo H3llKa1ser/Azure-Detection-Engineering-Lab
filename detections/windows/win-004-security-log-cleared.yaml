@@ -1,0 +1,38 @@
+id: WIN-004
+name: Windows Security event log cleared
+description: |
+  The Security event log was cleared (1102). Legitimate clearing is rare
+  on servers; attackers do it to remove evidence of logons, account changes
+  and process execution. Because the AMA ships events in near real time,
+  what happened before the clear is usually already in the workspace.
+severity: High
+requires: [windows_vm]
+tactics: [DefenseEvasion]
+techniques: [T1070]
+sub_techniques: [T1070.001]
+query_frequency: PT5M
+query_period: PT30M
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  SecurityEvent
+  | where EventID == 1102
+  | extend Actor = coalesce(
+        SubjectUserName,
+        extract(@"<SubjectUserName>([^<]+)</SubjectUserName>", 1, tostring(EventData)),
+        Account)
+  | project TimeGenerated, Computer, Actor, Activity
+entity_mappings:
+  - entity_type: Host
+    field_mappings:
+      - identifier: HostName
+        column_name: Computer
+  - entity_type: Account
+    field_mappings:
+      - identifier: Name
+        column_name: Actor
+simulation: simulate/scenarios/win-sim-chain.sh
+false_positives:
+  - Golden-image preparation (sysprep) - should never happen on running workloads.
+references:
+  - https://attack.mitre.org/techniques/T1070/001/
