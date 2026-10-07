@@ -37,6 +37,8 @@ locals {
     "storage",
     var.deploy_windows_vm ? "windows_vm" : "",
     var.deploy_linux_vm ? "linux_vm" : "",
+    var.enable_entra_id ? "entra_id" : "",
+    var.entra_id_p2 ? "entra_id_p2" : "",
   ]))
 
   detections = {
@@ -72,6 +74,18 @@ resource "azurerm_sentinel_alert_rule_scheduled" "detection" {
 
   custom_details = try(each.value.custom_details, null)
 
+  # Dynamic alert name / severity from query columns, e.g. a CA policy
+  # *deletion* is High while a creation is Low - same rule.
+  dynamic "alert_details_override" {
+    for_each = can(each.value.alert_details_override) ? [local.detection_rendered[each.key].alert_details_override] : []
+    content {
+      display_name_format  = try(alert_details_override.value.display_name_format, null)
+      description_format   = try(alert_details_override.value.description_format, null)
+      severity_column_name = try(alert_details_override.value.severity_column_name, null)
+      tactics_column_name  = try(alert_details_override.value.tactics_column_name, null)
+    }
+  }
+
   dynamic "entity_mapping" {
     for_each = try(each.value.entity_mappings, [])
     content {
@@ -103,5 +117,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "detection" {
     azurerm_monitor_diagnostic_setting.activity_log,
     azurerm_monitor_diagnostic_setting.key_vault,
     azurerm_monitor_diagnostic_setting.blob,
+    azurerm_monitor_aad_diagnostic_setting.entra,
+    azurerm_sentinel_watchlist_item.canary_accounts,
   ]
 }
