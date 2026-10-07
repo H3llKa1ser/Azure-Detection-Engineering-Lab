@@ -61,5 +61,18 @@ resource "local_file" "sim_env" {
     SIM_IDENTITY_PRINCIPAL_ID="${azurerm_user_assigned_identity.sim_target.principal_id}"
     WIN_VM="${var.deploy_windows_vm ? azurerm_windows_virtual_machine.win[0].name : ""}"
     LINUX_VM="${var.deploy_linux_vm ? azurerm_linux_virtual_machine.linux[0].name : ""}"
+    DEPLOYED_DETECTIONS="${join(" ", sort(keys(local.detections)))}"
+    TENANT_ID="${data.azurerm_client_config.current.tenant_id}"
+    ENTRA_ENABLED="${var.enable_entra_id}"
+    ENTRA_P2="${var.entra_id_p2}"
+    CANARY_UPNS="${join(" ", [for u in azuread_user.canary : u.user_principal_name])}"
+    SIM_ROLE_TARGET_ID="${var.enable_entra_id ? azuread_user.sim_role_target[0].object_id : ""}"
+    SIM_APP_ID="${var.enable_entra_id ? azuread_application.sim[0].client_id : ""}"
+    SIM_SP_ID="${var.enable_entra_id ? azuread_service_principal.sim[0].object_id : ""}"
   ENV
+}
+
+output "entra_canary_accounts" {
+  description = "Disabled honeytoken accounts. Any sign-in attempt raises ENT-002."
+  value       = [for u in azuread_user.canary : u.user_principal_name]
 }
