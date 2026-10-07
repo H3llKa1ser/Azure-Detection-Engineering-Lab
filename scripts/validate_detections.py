@@ -46,7 +46,7 @@ REQUIRED = [
     "query_frequency", "query_period", "query", "entity_mappings", "simulation",
 ]
 SEVERITIES = {"Informational", "Low", "Medium", "High"}
-SOURCES = {"azure_activity", "key_vault", "storage", "windows_vm", "linux_vm", "entra_id", "entra_id_p2", "flow_logs"}
+SOURCES = {"azure_activity", "key_vault", "storage", "windows_vm", "linux_vm", "entra_id", "entra_id_p2", "flow_logs", "sysmon"}
 OVERRIDE_KEYS = {"display_name_format", "description_format", "severity_column_name", "tactics_column_name"}
 # Kill-chain order (a list, not a set, so generated output is deterministic).
 TACTIC_ORDER = [
