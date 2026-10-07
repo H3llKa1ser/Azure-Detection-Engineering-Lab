@@ -237,6 +237,67 @@ run "rejects_bad_flow_interval" {
   expect_failures = [var.flow_log_interval_minutes]
 }
 
+run "sysmon_adds_host_detections" {
+  command = plan
+
+  variables {
+    enable_sysmon = true
+  }
+
+  assert {
+    condition     = length(azurerm_sentinel_alert_rule_scheduled.detection) == 20
+    error_message = "With Sysmon enabled (and both VMs default-on), 14 core + 6 Sysmon detections should be planned."
+  }
+
+  assert {
+    condition     = length(azurerm_monitor_data_collection_rule.sysmon) == 1 && length(azurerm_virtual_machine_run_command.install_sysmon) == 1
+    error_message = "Sysmon DCR and install Run Command should be planned."
+  }
+
+  assert {
+    condition     = contains(keys(azurerm_sentinel_alert_rule_scheduled.detection), "SYS-002")
+    error_message = "The LSASS-access rule should deploy with Sysmon."
+  }
+
+  assert {
+    condition     = azurerm_monitor_data_collection_rule.sysmon[0].data_sources[0].windows_event_log[0].streams[0] == "Microsoft-Event"
+    error_message = "Sysmon must be collected into the Event table (Microsoft-Event stream), not SecurityEvent."
+  }
+}
+
+run "sysmon_needs_windows_vm" {
+  command = plan
+
+  variables {
+    enable_sysmon     = true
+    deploy_windows_vm = false
+  }
+
+  assert {
+    condition     = length(azurerm_monitor_data_collection_rule.sysmon) == 0 && length(azurerm_virtual_machine_run_command.install_sysmon) == 0
+    error_message = "Sysmon resources require the Windows VM; none should be created without it."
+  }
+
+  assert {
+    condition     = !contains(keys(azurerm_sentinel_alert_rule_scheduled.detection), "SYS-001")
+    error_message = "Sysmon detections must be skipped when the Windows VM (and thus Sysmon) is off."
+  }
+}
+
+run "sysmon_off_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(azurerm_monitor_data_collection_rule.sysmon) == 0
+    error_message = "No Sysmon resources unless enable_sysmon = true."
+  }
+
+  assert {
+    condition     = !contains(keys(azurerm_sentinel_alert_rule_scheduled.detection), "SYS-002")
+    error_message = "Sysmon detections must not deploy by default."
+  }
+}
+
 run "p2_requires_entra" {
   command = plan
 
