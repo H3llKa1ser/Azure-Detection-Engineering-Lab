@@ -7,7 +7,7 @@ name: Short human-readable name
 description: |
   What it detects, why an attacker does it, why it matters.
 severity: Medium            # Informational | Low | Medium | High
-requires: [azure_activity]  # azure_activity | key_vault | storage | windows_vm | linux_vm | entra_id | entra_id_p2
+requires: [azure_activity]  # azure_activity | key_vault | storage | windows_vm | linux_vm | entra_id | entra_id_p2 | flow_logs | sysmon
 tactics: [DefenseEvasion]   # Sentinel tactic names (no spaces)
 techniques: [T1562]         # parent technique IDs only
 sub_techniques: [T1562.008] # optional, documentation + catalog
