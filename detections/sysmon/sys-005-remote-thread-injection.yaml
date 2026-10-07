@@ -1,0 +1,56 @@
+id: SYS-005
+name: Remote thread created in another process (Sysmon EID 8)
+description: |
+  A process created a thread inside a different process (EID 8). This is the
+  mechanic behind classic code injection - CreateRemoteThread used to run a
+  payload in the address space of a trusted process to evade detection and
+  access its privileges. Sysmon records the source, target and start address.
+severity: High
+requires: [sysmon]
+tactics: [DefenseEvasion, PrivilegeEscalation]
+techniques: [T1055]
+sub_techniques: [T1055.002]
+query_frequency: PT10M
+query_period: PT30M
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  // Signed OS components that legitimately create remote threads.
+  let benign_sources = dynamic(["csrss.exe", "services.exe", "svchost.exe", "wininit.exe", "msmpeng.exe"]);
+  Event
+  | where Source == "Microsoft-Windows-Sysmon" and EventID == 8
+  | extend SourceImage = extract(@'Name="SourceImage">([^<]+)', 1, EventData),
+           TargetImage = extract(@'Name="TargetImage">([^<]+)', 1, EventData),
+           StartAddress = extract(@'Name="StartAddress">([^<]+)', 1, EventData),
+           StartModule = extract(@'Name="StartModule">([^<]+)', 1, EventData),
+           StartFunction = extract(@'Name="StartFunction">([^<]+)', 1, EventData),
+           SourceUser = extract(@'Name="SourceUser">([^<]+)', 1, EventData)
+  | extend SourceImageName = tolower(tostring(split(SourceImage, "\\")[-1])),
+           TargetImageName = tolower(tostring(split(TargetImage, "\\")[-1]))
+  | where SourceImageName !in (benign_sources)
+  // A remote thread with no backing module is the classic injection tell.
+  | extend UnbackedStart = isempty(StartModule)
+  | project TimeGenerated, Computer, SourceImage, SourceImageName, TargetImage, TargetImageName,
+            StartAddress, StartModule, StartFunction, UnbackedStart, SourceUser
+entity_mappings:
+  - entity_type: Host
+    field_mappings:
+      - identifier: HostName
+        column_name: Computer
+  - entity_type: Account
+    field_mappings:
+      - identifier: Name
+        column_name: SourceUser
+  - entity_type: Process
+    field_mappings:
+      - identifier: CommandLine
+        column_name: SourceImage
+custom_details:
+  TargetImage: TargetImage
+  StartModule: StartModule
+  UnbackedStart: UnbackedStart
+simulation: simulate/scenarios/win-sysmon-chain.sh
+false_positives:
+  - Some debuggers, EDR agents and installers inject legitimately. Baseline source images and add to benign_sources.
+references:
+  - https://attack.mitre.org/techniques/T1055/002/
