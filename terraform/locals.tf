@@ -33,11 +33,12 @@ locals {
 
   # Values injected into every detection YAML before it is decoded.
   detection_vars = {
-    canary_secret_name = local.canary_secret_name
-    canary_blob_name   = local.canary_blob_name
-    canary_blob_leaf   = basename(local.canary_blob_name)
-    key_vault_name     = "kv-${local.name}"
-    storage_name       = "st${var.prefix}${local.suffix}"
-    watchlist_alias    = "LabApprovedPrivilegedCallers"
+    canary_secret_name     = local.canary_secret_name
+    canary_blob_name       = local.canary_blob_name
+    canary_blob_leaf       = basename(local.canary_blob_name)
+    key_vault_name         = "kv-${local.name}"
+    storage_name           = "st${var.prefix}${local.suffix}"
+    watchlist_alias        = "LabApprovedPrivilegedCallers"
+    canary_watchlist_alias = "LabCanaryAccounts"
   }
 }
