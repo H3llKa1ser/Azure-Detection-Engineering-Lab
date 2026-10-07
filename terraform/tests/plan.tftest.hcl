@@ -184,6 +184,59 @@ run "entra_p2_adds_risk_detection" {
   }
 }
 
+run "flow_logs_add_network_detections" {
+  command = plan
+
+  variables {
+    enable_flow_logs = true
+  }
+
+  assert {
+    condition     = length(azurerm_sentinel_alert_rule_scheduled.detection) == 19
+    error_message = "With flow logs enabled, 14 core + 5 network detections should be planned."
+  }
+
+  assert {
+    condition     = length(azurerm_network_watcher_flow_log.lab) == 1 && length(azurerm_network_watcher_flow_log.lab[0].traffic_analytics) == 1
+    error_message = "VNet flow log with Traffic Analytics should be planned."
+  }
+
+  assert {
+    condition     = contains(keys(azurerm_sentinel_alert_rule_scheduled.detection), "NET-003")
+    error_message = "NET-003 lateral-movement rule should deploy with flow logs."
+  }
+
+  assert {
+    condition     = azurerm_sentinel_alert_rule_scheduled.detection["NET-005"].alert_details_override[0].display_name_format != ""
+    error_message = "NET-005 should set a dynamic alert name."
+  }
+}
+
+run "flow_logs_off_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(azurerm_network_watcher_flow_log.lab) == 0 && length(azurerm_storage_account.flowlogs) == 0
+    error_message = "No flow-log resources should be created unless enable_flow_logs = true."
+  }
+
+  assert {
+    condition     = !contains(keys(azurerm_sentinel_alert_rule_scheduled.detection), "NET-001")
+    error_message = "Network detections must be skipped when flow logs are off."
+  }
+}
+
+run "rejects_bad_flow_interval" {
+  command = plan
+
+  variables {
+    enable_flow_logs          = true
+    flow_log_interval_minutes = 15
+  }
+
+  expect_failures = [var.flow_log_interval_minutes]
+}
+
 run "p2_requires_entra" {
   command = plan
 
