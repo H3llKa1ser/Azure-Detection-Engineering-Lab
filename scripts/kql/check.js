@@ -23,6 +23,8 @@ const VARS = {
   storage_name: 'stdetlababcde',
   watchlist_alias: 'LabApprovedPrivilegedCallers',
   canary_watchlist_alias: 'LabCanaryAccounts',
+  victim_subnet_cidr: '10.42.1.0/24',
+  internal_mgmt_ports: '22, 3389, 5985, 5986, 445, 135, 1433, 3306, 5432, 6379, 27017',
 };
 const render = (s) => s.replace(/\$\{([a-z_]+)\}/g, (_, k) => {
   if (!(k in VARS)) throw new Error(`unknown template variable \${${k}}`);
