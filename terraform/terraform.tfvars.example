@@ -15,5 +15,10 @@ auto_shutdown_timezone = "W. Europe Standard Time"
 
 daily_quota_gb = 1
 
+# Identity layer - needs Entra ID P1 (P2 for risk detections) and tenant admin
+# rights. Use a dev/test tenant. See docs/entra-id.md.
+enable_entra_id = false
+entra_id_p2     = false
+
 # Break-glass accounts / CI service principals. Do NOT add yourself.
 approved_privileged_callers = []
