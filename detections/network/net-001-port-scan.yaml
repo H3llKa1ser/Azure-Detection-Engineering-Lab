@@ -1,0 +1,52 @@
+id: NET-001
+name: Port scan from a single source (many destination ports)
+description: |
+  One source IP attempted connections to many distinct destination ports on
+  one target within a short window - the signature of a vertical port scan.
+  Denied flows weigh toward reconnaissance; the rule counts distinct ports
+  from Traffic Analytics' aggregated flow records.
+severity: Medium
+requires: [flow_logs]
+tactics: [Discovery, Reconnaissance]
+techniques: [T1046]
+query_frequency: PT30M
+query_period: PT1H
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  // Traffic Analytics aggregates by 4-tuple over its processing interval, so
+  // a scan shows up as many rows (one per port) sharing SrcIp+DestIp.
+  let distinct_port_threshold = 100;
+  NTANetAnalytics
+  | where SubType == "FlowLog"
+  | where isnotempty(SrcIp) and isnotempty(DestIp)
+  | summarize DistinctPorts = dcount(DestPort), Ports = make_set(DestPort, 200),
+              DeniedFlows = sum(DeniedInFlows + DeniedOutFlows),
+              AllowedFlows = sum(AllowedInFlows + AllowedOutFlows),
+              L4Protocols = make_set(L4Protocol), FlowStatuses = make_set(FlowStatus),
+              FirstSeen = min(FlowStartTime), LastSeen = max(FlowEndTime)
+              by SrcIp, DestIp
+  | where DistinctPorts >= distinct_port_threshold
+  | extend ScanType = iff(DeniedFlows > AllowedFlows, "mostly-denied (recon)", "mostly-allowed (check exposure)")
+  | project TimeGenerated = LastSeen, FirstSeen, SrcIp, DestIp, DistinctPorts, DeniedFlows,
+            AllowedFlows, ScanType, L4Protocols, Ports
+entity_mappings:
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: SrcIp
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: DestIp
+custom_details:
+  DistinctPorts: DistinctPorts
+  ScanType: ScanType
+  DeniedFlows: DeniedFlows
+simulation: simulate/scenarios/net-sim-chain.sh
+false_positives:
+  - Vulnerability scanners and asset-discovery tools (Qualys, Nessus, Defender for Cloud agents) - allowlist their source IPs.
+  - Load balancer / health-probe source ranges.
+references:
+  - https://attack.mitre.org/techniques/T1046/
+  - https://learn.microsoft.com/azure/network-watcher/traffic-analytics-schema
