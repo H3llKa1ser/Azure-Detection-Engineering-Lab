@@ -27,6 +27,23 @@ mock_provider "http" {
 
 mock_provider "local" {}
 
+mock_provider "azuread" {
+  mock_data "azuread_domains" {
+    defaults = {
+      domains = [{
+        domain_name         = "contoso.onmicrosoft.com"
+        admin_managed       = true
+        authentication_type = "Managed"
+        default             = true
+        initial             = true
+        root                = true
+        verified            = true
+        supported_services  = []
+      }]
+    }
+  }
+}
+
 variables {
   subscription_id = "00000000-0000-0000-0000-000000000000"
 }
@@ -95,9 +112,86 @@ run "no_vms_skips_host_detections" {
   }
 
   assert {
+    condition     = length(azuread_user.canary) == 0 && length(azurerm_monitor_aad_diagnostic_setting.entra) == 0
+    error_message = "No tenant-level resources should be created unless enable_entra_id = true."
+  }
+
+  assert {
     condition     = length(data.http.operator_ip) == 0
     error_message = "IP auto-detection must not run when operator_ip is supplied."
   }
+}
+
+run "entra_p1_adds_identity_detections" {
+  command = plan
+
+  variables {
+    enable_entra_id = true
+  }
+
+  assert {
+    condition     = length(azurerm_sentinel_alert_rule_scheduled.detection) == 20
+    error_message = "With Entra ID (P1) enabled, 14 + 6 identity detections should be planned (ENT-007 needs P2)."
+  }
+
+  assert {
+    condition     = !contains(keys(azurerm_sentinel_alert_rule_scheduled.detection), "ENT-007")
+    error_message = "The P2 risk detection must not deploy without entra_id_p2."
+  }
+
+  assert {
+    condition     = length(azuread_user.canary) == 5 && alltrue([for u in azuread_user.canary : u.account_enabled == false])
+    error_message = "Five canary accounts should be planned, all disabled."
+  }
+
+  assert {
+    condition     = endswith(azuread_user.canary["svc-sql-backup"].user_principal_name, "@contoso.onmicrosoft.com")
+    error_message = "Canary UPNs should use the tenant's initial domain."
+  }
+
+  assert {
+    condition     = length(azurerm_sentinel_watchlist_item.canary_accounts) == 5
+    error_message = "Every canary account must be in the canary watchlist used by ENT-002."
+  }
+
+  assert {
+    condition     = !contains([for l in azurerm_monitor_aad_diagnostic_setting.entra[0].enabled_log : l.category], "UserRiskEvents")
+    error_message = "P2-only log categories must not be requested on a P1 tenant."
+  }
+
+  assert {
+    condition     = azurerm_sentinel_alert_rule_scheduled.detection["ENT-005"].alert_details_override[0].severity_column_name == "AlertSeverity"
+    error_message = "ENT-005 must take its severity from the AlertSeverity column."
+  }
+}
+
+run "entra_p2_adds_risk_detection" {
+  command = plan
+
+  variables {
+    enable_entra_id = true
+    entra_id_p2     = true
+  }
+
+  assert {
+    condition     = length(azurerm_sentinel_alert_rule_scheduled.detection) == 21
+    error_message = "With Entra ID P2 all 21 detections should be planned."
+  }
+
+  assert {
+    condition     = contains([for l in azurerm_monitor_aad_diagnostic_setting.entra[0].enabled_log : l.category], "UserRiskEvents")
+    error_message = "P2 should stream the Identity Protection risk logs."
+  }
+}
+
+run "p2_requires_entra" {
+  command = plan
+
+  variables {
+    entra_id_p2 = true
+  }
+
+  expect_failures = [var.entra_id_p2]
 }
 
 run "rejects_bad_prefix" {
