@@ -30,4 +30,26 @@ let Syslog = datatable(
     TimeGenerated:datetime, Computer:string, HostIP:string, HostName:string, Facility:string,
     SeverityLevel:string, ProcessName:string, ProcessID:int, SyslogMessage:string,
     _ResourceId:string)[];
-let _GetWatchlist = (watchlistAlias:string) { datatable(SearchKey:string, Caller:string, Reason:string)[] };
+let SigninLogs = datatable(
+    TimeGenerated:datetime, UserPrincipalName:string, UserId:string, UserDisplayName:string,
+    IPAddress:string, Location:string, LocationDetails:dynamic, ResultType:string,
+    ResultDescription:string, AppDisplayName:string, AppId:string, ClientAppUsed:string,
+    UserAgent:string, ConditionalAccessStatus:string, AuthenticationRequirement:string,
+    RiskLevelDuringSignIn:string, RiskLevelAggregated:string, RiskState:string,
+    RiskDetail:string, RiskEventTypes_V2:string, CorrelationId:string, Category:string)[];
+let AADNonInteractiveUserSignInLogs = datatable(
+    TimeGenerated:datetime, UserPrincipalName:string, UserId:string, UserDisplayName:string,
+    IPAddress:string, Location:string, LocationDetails:string, ResultType:string,
+    ResultDescription:string, AppDisplayName:string, AppId:string, ClientAppUsed:string,
+    UserAgent:string, ConditionalAccessStatus:string, AuthenticationRequirement:string,
+    RiskLevelDuringSignIn:string, RiskLevelAggregated:string, RiskState:string,
+    RiskDetail:string, RiskEventTypes_V2:string, CorrelationId:string, Category:string)[];
+let AuditLogs = datatable(
+    TimeGenerated:datetime, OperationName:string, ActivityDisplayName:string, Category:string,
+    Result:string, ResultReason:string, LoggedByService:string, InitiatedBy:dynamic,
+    TargetResources:dynamic, AdditionalDetails:dynamic, CorrelationId:string, Id:string)[];
+let AADUserRiskEvents = datatable(
+    TimeGenerated:datetime, UserPrincipalName:string, UserId:string, UserDisplayName:string,
+    IpAddress:string, Location:dynamic, RiskLevel:string, RiskEventType:string, RiskState:string,
+    RiskDetail:string, DetectionTimingType:string, Source:string, Id:string)[];
+let _GetWatchlist = (watchlistAlias:string) { datatable(SearchKey:string, Caller:string, Reason:string, UserPrincipalName:string, ObjectId:string, Purpose:string)[] };
