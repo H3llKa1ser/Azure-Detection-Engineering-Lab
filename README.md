@@ -3,10 +3,11 @@
 [![ci](https://github.com/H3llKa1ser/Azure-Detection-Engineering-Lab/actions/workflows/ci.yml/badge.svg)](https://github.com/H3llKa1ser/Azure-Detection-Engineering-Lab/actions/workflows/ci.yml)
 ![Terraform](https://img.shields.io/badge/terraform-%E2%89%A51.9-7B42BC)
 ![azurerm](https://img.shields.io/badge/azurerm-5.x-0078D4)
-![Detections](https://img.shields.io/badge/detections-21-success)
+![Detections](https://img.shields.io/badge/detections-26-success)
 
 A blue-team lab on Azure, built entirely with Terraform: Microsoft Sentinel,
-instrumented victim hosts, Entra ID identity telemetry, honeytokens,
+instrumented victim hosts, Entra ID identity telemetry, VNet flow logs,
+honeytokens,
 **detections as code**, and an attack simulation harness that proves every
 rule actually fires.
 
@@ -39,7 +40,7 @@ flowchart LR
             ST[Storage<br/>canary blob]
             NSGSIM[Unattached NSG<br/>simulation target]
             LAW[(Log Analytics)]
-            SEN[Microsoft Sentinel<br/>up to 21 analytics rules<br/>watchlists + automation]
+            SEN[Microsoft Sentinel<br/>up to 26 analytics rules<br/>watchlists + automation]
         end
     end
     subgraph ENTRA[Entra ID tenant - optional]
@@ -52,6 +53,7 @@ flowchart LR
     KV -- AuditEvent --> LAW
     ST -- StorageBlobLogs --> LAW
     AL -- AzureActivity --> LAW
+    VNET -- VNet flow logs + Traffic Analytics --> LAW
     LAW --> SEN
     OP[Operator<br/>az CLI] -- Run Command / data plane --> RG
 ```
@@ -59,10 +61,10 @@ flowchart LR
 | Layer | What's deployed |
 |---|---|
 | SIEM | Log Analytics workspace (daily cap), Sentinel onboarding |
-| Telemetry | Subscription Activity Log, Key Vault audit, Blob read/write/delete logs, Windows Security events and Linux auth syslog via Azure Monitor Agent + Data Collection Rules, and optionally Entra ID sign-in, audit and risk logs |
+| Telemetry | Subscription Activity Log, Key Vault audit, Blob read/write/delete logs, Windows Security events and Linux auth syslog via Azure Monitor Agent + Data Collection Rules, and optionally Entra ID sign-in/audit/risk logs and VNet flow logs enriched by Traffic Analytics |
 | Victims | Windows Server 2022 and Ubuntu 24.04, Trusted Launch, no public IPs, nightly auto-shutdown |
 | Deception | Canary Key Vault secret, decoy secrets, canary "payroll export" blob, and (Entra layer) disabled canary user accounts |
-| Detections | 21 scheduled analytics rules generated from YAML (14 core + 7 identity), mapped to MITRE ATT&CK, with entity mappings, custom details and dynamic severity |
+| Detections | 26 scheduled analytics rules generated from YAML (14 core + 7 identity + 5 network), mapped to MITRE ATT&CK, with entity mappings, custom details and dynamic severity |
 | Response | Allowlist and honeytoken watchlists, automation rule that labels every incident and attaches a triage task checklist |
 | Simulation | Bash + az CLI scenarios, Windows/Linux attack chains via Run Command, `verify.sh` closes the loop |
 
@@ -93,10 +95,20 @@ Full catalog with ATT&CK links: [`docs/detection-catalog.md`](docs/detection-cat
 | ENT-005 | Conditional Access policy changed (High on delete/disable) | Low-High | T1556.009 |
 | ENT-006 | High-risk Graph permission granted to an app | High | T1528, T1098.003 |
 | ENT-007 | Identity Protection medium/high risk (P2) | Med/High | T1078.004 |
+| NET-001 | Vertical port scan (one source, many ports) | Medium | T1046 |
+| NET-002 | Horizontal host sweep (one source, many hosts) | Medium | T1046, T1018 |
+| NET-003 | East-west connection to management ports | High | T1021 |
+| NET-004 | Traffic Analytics flagged a malicious flow | High | T1071 |
+| NET-005 | Large outbound data transfer to an external IP | Medium | T1048.003 |
 
 The ENT rules are deployed only with `enable_entra_id = true` (ENT-007 also needs
 `entra_id_p2 = true`). Prerequisites, required roles and simulation safety tiers
 are in [`docs/entra-id.md`](docs/entra-id.md).
+
+The NET rules are deployed only with `enable_flow_logs = true`. They read the
+`NTANetAnalytics` table produced by VNet flow logs + Traffic Analytics; see
+[`docs/network-detections.md`](docs/network-detections.md) for cost, the 10-60 min
+processing latency, and the lateral-movement baseline NET-003 assumes.
 
 ## Quick start
 
@@ -127,6 +139,9 @@ make verify        # FIRED / MISSING per detection
 
 To add the identity layer, set `enable_entra_id = true` (and `entra_id_p2 = true`
 on a P2 tenant) and re-apply; see [`docs/entra-id.md`](docs/entra-id.md) first.
+To add network detections, set `enable_flow_logs = true` and re-apply; see
+[`docs/network-detections.md`](docs/network-detections.md) (expect 30-75 min
+before flow-log alerts appear).
 The scenarios that temporarily change tenant objects only run when you opt in:
 
 ```bash
@@ -161,7 +176,7 @@ picks up every YAML file and turns it into a Sentinel rule, skipping any whose
 |---|---|
 | `scripts/validate_detections.py` | Schema, duplicate IDs, Sentinel limits (frequency/period bounds, entity and field-mapping counts), valid tactic names, ATT&CK ID formats, entity/custom-detail columns that don't exist in the query, missing simulation scripts, stale catalog |
 | `scripts/kql/check.js` | **KQL syntax and semantic analysis** using Microsoft's `Kusto.Language` library against a declared table schema: unknown tables/columns, columns referenced after a `summarize` dropped them, type errors |
-| `terraform test` | Offline plan tests with mocked providers: correct rule counts for every data-source combination (14 / 8 / 20 / 21), canary accounts disabled and on the watchlist, no tenant resources unless opted in, P2 log categories only with P2, firewalls default-deny, variable validation |
+| `terraform test` | Offline plan tests with mocked providers: correct rule counts for every data-source combination (14 / 8 / 19 / 20 / 21), canary accounts disabled and on the watchlist, VNet flow log targets the VNet, no optional resources unless opted in, P2 log categories only with P2, firewalls default-deny, variable validation |
 | `terraform fmt` / `validate`, `tflint` (+ azurerm ruleset) | Style, schema, retired VM sizes, invalid SKUs |
 | Checkov | IaC misconfigurations; every skip is inline with a written justification |
 | ShellCheck | Simulation scripts |
@@ -214,6 +229,13 @@ an `AlertSeverity` column and the loader wires it to Sentinel's
 `alert_details_override`, which the validator checks (the column must exist, and
 custom alert names must keep the `[ID]` prefix `verify.sh` relies on).
 
+**VNet flow logs, not NSG flow logs.** Microsoft retired NSG flow logs in June
+2025. This lab uses VNet flow logs, which attach to the virtual network and
+cover every NIC in it, and reads the `NTANetAnalytics` table that Traffic
+Analytics produces (the older `AzureNetworkAnalytics_CL` is gone). Flow-log
+storage is a separate account from the canary so its writes never show up in the
+STG-001 honeytoken telemetry.
+
 **azurerm 5.x changes.** The provider no longer auto-registers ~60 resource providers;
 this lab registers exactly the 10 it needs. Key Vault now requires
 `rbac_authorization_enabled`, and tflint's azurerm ruleset flagged the B-series v1
@@ -231,6 +253,10 @@ region, and `make destroy` at the end of each session.
 
 Set `deploy_windows_vm = false` and `deploy_linux_vm = false` for a near-zero-cost,
 cloud-only lab (8 detections: Activity Log, Key Vault, Storage).
+
+The optional layers add cost: Entra ID needs P1/P2 licensing, and Traffic
+Analytics (`enable_flow_logs`) bills for flow-log ingestion and processing - leave
+both off unless you're exercising them.
 
 ## Security notes
 
@@ -251,13 +277,15 @@ cloud-only lab (8 detections: Activity Log, Key Vault, Storage).
 | `verify.sh` shows MISSING | Check ingestion first (`AzureDiagnostics \| take 1`, `SecurityEvent \| take 1`), then the rule's health in Sentinel > Analytics. Host rules show MISSING if that VM isn't deployed |
 | Role-assignment scenario fails | Your account needs Owner or User Access Administrator on the lab resource group |
 | ENT-003..006 show MISSING | They only run with `ALLOW_TENANT_CHANGES=1`; a 403 from Graph means the CLI token or your Entra role is insufficient (see [`docs/entra-id.md`](docs/entra-id.md)) |
+| NET-* show MISSING | Traffic Analytics adds 10-60 min processing latency; wait 30-75 min and confirm the `NTANetAnalytics` table has data. NET-004 is not auto-simulated |
 
 ## Repo layout
 
 ```
 .
 ├── detections/                 # detection-as-code: one YAML per rule
-│   ├── azure-activity/  keyvault/  storage/  windows/  linux/  entra-id/
+│   ├── azure-activity/  keyvault/  storage/  windows/  linux/
+│   ├── entra-id/  network/
 │   └── _TEMPLATE.yaml.example
 ├── simulate/
 │   ├── scenarios/              # one script per detection (or chain)
@@ -269,6 +297,7 @@ cloud-only lab (8 detections: Activity Log, Key Vault, Storage).
 │   ├── network.tf  compute.tf  dcr.tf
 │   ├── canaries.tf             # Key Vault, Storage, honeytoken seeding
 │   ├── entra.tf                # Entra ID logs, canary accounts, sim targets
+│   ├── netwatch.tf             # VNet flow logs + Traffic Analytics
 │   ├── detections.tf           # YAML -> Sentinel rule loader
 │   ├── sentinel.tf             # watchlist, automation rule
 │   ├── tests/plan.tftest.hcl   # offline plan tests
@@ -278,14 +307,15 @@ cloud-only lab (8 detections: Activity Log, Key Vault, Storage).
 │   └── kql/                    # Kusto.Language semantic checker + schema
 ├── docs/
 │   ├── detection-catalog.md    # generated
-│   └── entra-id.md             # identity layer: prerequisites, roles, safety
+│   ├── entra-id.md             # identity layer: prerequisites, roles, safety
+│   └── network-detections.md   # flow logs: cost, latency, tuning
 └── .github/workflows/ci.yml
 ```
 
 ## Roadmap
 
 - [x] Entra ID sign-in/audit/risk logs and identity detections ([docs](docs/entra-id.md))
-- [ ] VNet flow logs + Traffic Analytics, network detections
+- [x] VNet flow logs + Traffic Analytics, network detections ([docs](docs/network-detections.md))
 - [ ] Logic App playbook: auto-disable principal on KV-001 / STG-001
 - [ ] Sysmon on the Windows host
 - [ ] Atomic Red Team integration for broader technique coverage
