@@ -141,3 +141,15 @@ variable "internal_mgmt_ports" {
   type        = list(number)
   default     = [22, 3389, 5985, 5986, 445, 135, 1433, 3306, 5432, 6379, 27017]
 }
+
+variable "enable_sysmon" {
+  description = "Install Sysmon on the Windows victim and collect its operational channel into the Event table. Requires deploy_windows_vm = true."
+  type        = bool
+  default     = false
+}
+
+variable "sysmon_config_url" {
+  description = "URL to a Sysmon config XML. Empty uses the compact built-in lab config. Point at SwiftOnSecurity/Olaf Hartong for fuller coverage."
+  type        = string
+  default     = ""
+}
