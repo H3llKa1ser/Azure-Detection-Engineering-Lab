@@ -1,0 +1,54 @@
+id: SYS-006
+name: Sysmon configuration change or service tampering
+description: |
+  Sysmon's own configuration was changed (EID 16) or Sysmon was invoked to
+  uninstall or reconfigure itself (EID 1). Attackers blind Sysmon before
+  acting - unloading it, clearing its filtering, or swapping the config.
+  Because Sysmon reports its own config change, this catches the attempt.
+severity: High
+requires: [sysmon]
+tactics: [DefenseEvasion]
+techniques: [T1562]
+sub_techniques: [T1562.001]
+query_frequency: PT5M
+query_period: PT30M
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  let config_changes = Event
+      | where Source == "Microsoft-Windows-Sysmon" and EventID == 16
+      | extend Activity = "Sysmon config changed",
+               Detail = extract(@'Name="Configuration">([^<]+)', 1, EventData),
+               User = extract(@'Name="UserName">([^<]+)', 1, EventData),
+               Image = "C:\\Windows\\Sysmon64.exe"
+      | project TimeGenerated, Computer, Activity, Detail, User, Image;
+  let sysmon_cli = Event
+      | where Source == "Microsoft-Windows-Sysmon" and EventID == 1
+      | extend Image = extract(@'Name="Image">([^<]+)', 1, EventData),
+               CommandLine = extract(@'Name="CommandLine">([^<]+)', 1, EventData),
+               User = extract(@'Name="User">([^<]+)', 1, EventData)
+      | where tolower(Image) has "sysmon"
+      | where CommandLine has_any (" -u", " -c ", " -i ")
+      | extend Activity = "Sysmon CLI invoked (install/reconfigure/uninstall)", Detail = CommandLine
+      | project TimeGenerated, Computer, Activity, Detail, User, Image;
+  union config_changes, sysmon_cli
+  | project TimeGenerated, Computer, Activity, Detail, User, Image
+entity_mappings:
+  - entity_type: Host
+    field_mappings:
+      - identifier: HostName
+        column_name: Computer
+  - entity_type: Account
+    field_mappings:
+      - identifier: Name
+        column_name: User
+custom_details:
+  Activity: Activity
+  Detail: Detail
+alert_details_override:
+  display_name_format: "[SYS-006] {{Activity}} on {{Computer}}"
+simulation: simulate/scenarios/win-sysmon-chain.sh
+false_positives:
+  - Planned Sysmon deployment and config-management updates. Allowlist the deployment identity/time window. In this lab, Terraform's install-sysmon Run Command is an expected trigger.
+references:
+  - https://attack.mitre.org/techniques/T1562/001/
