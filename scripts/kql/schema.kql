@@ -18,6 +18,10 @@ let StorageBlobLogs = datatable(
     RequesterObjectId:string, RequesterAppId:string, RequesterTenantId:string,
     StatusCode:string, StatusText:string, UserAgentHeader:string, ObjectKey:string,
     _ResourceId:string)[];
+let Event = datatable(
+    TimeGenerated:datetime, Source:string, EventLog:string, Computer:string, EventCategory:int,
+    EventData:string, EventID:int, EventLevel:int, EventLevelName:string, ParameterXml:string,
+    RenderedDescription:string, Message:string, UserName:string, Type:string, _ResourceId:string)[];
 let SecurityEvent = datatable(
     TimeGenerated:datetime, Computer:string, EventID:int, Activity:string, Account:string,
     AccountType:string, TargetUserName:string, TargetDomainName:string, TargetSid:string,
