@@ -1,0 +1,44 @@
+id: NET-002
+name: Network sweep from a single source (many destination hosts)
+description: |
+  One source IP contacted many distinct destination IPs on a small set of
+  ports within a short window - a horizontal sweep looking for live hosts or
+  a specific open service across the network. Complements NET-001 (one host,
+  many ports) with the many-hosts, few-ports pattern.
+severity: Medium
+requires: [flow_logs]
+tactics: [Discovery, Reconnaissance]
+techniques: [T1046, T1018]
+query_frequency: PT30M
+query_period: PT1H
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  let distinct_host_threshold = 25;
+  NTANetAnalytics
+  | where SubType == "FlowLog"
+  | where isnotempty(SrcIp) and isnotempty(DestIp)
+  | summarize DistinctDestinations = dcount(DestIp), Destinations = make_set(DestIp, 100),
+              DistinctPorts = dcount(DestPort), Ports = make_set(DestPort, 20),
+              DeniedFlows = sum(DeniedInFlows + DeniedOutFlows),
+              AllowedFlows = sum(AllowedInFlows + AllowedOutFlows),
+              FirstSeen = min(FlowStartTime), LastSeen = max(FlowEndTime)
+              by SrcIp
+  | where DistinctDestinations >= distinct_host_threshold and DistinctPorts <= 5
+  | project TimeGenerated = LastSeen, FirstSeen, SrcIp, DistinctDestinations, DistinctPorts,
+            Ports, DeniedFlows, AllowedFlows, Destinations
+entity_mappings:
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: SrcIp
+custom_details:
+  DistinctDestinations: DistinctDestinations
+  Ports: Ports
+  DeniedFlows: DeniedFlows
+simulation: simulate/scenarios/net-sim-chain.sh
+false_positives:
+  - Monitoring, backup and config-management servers that legitimately talk to every host.
+  - Domain controllers and vulnerability scanners.
+references:
+  - https://attack.mitre.org/techniques/T1018/
