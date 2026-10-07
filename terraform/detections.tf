@@ -39,6 +39,7 @@ locals {
     var.deploy_linux_vm ? "linux_vm" : "",
     var.enable_entra_id ? "entra_id" : "",
     var.entra_id_p2 ? "entra_id_p2" : "",
+    var.enable_flow_logs ? "flow_logs" : "",
   ]))
 
   detections = {
@@ -119,5 +120,6 @@ resource "azurerm_sentinel_alert_rule_scheduled" "detection" {
     azurerm_monitor_diagnostic_setting.blob,
     azurerm_monitor_aad_diagnostic_setting.entra,
     azurerm_sentinel_watchlist_item.canary_accounts,
+    azurerm_network_watcher_flow_log.lab,
   ]
 }
