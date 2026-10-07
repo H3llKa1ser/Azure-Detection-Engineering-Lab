@@ -1,0 +1,63 @@
+id: SYS-001
+name: Suspicious LOLBin process creation (Sysmon EID 1)
+description: |
+  Sysmon recorded a process-creation event (EID 1) matching a
+  living-off-the-land pattern: a trusted built-in binary used for download,
+  execution or proxy-execution (certutil download, bitsadmin transfer,
+  mshta/regsvr32/rundll32 with a URL, encoded or hidden PowerShell). These
+  binaries are signed and allowlisted, so attackers abuse them to run code
+  without dropping obvious malware.
+severity: High
+requires: [sysmon]
+tactics: [Execution, DefenseEvasion]
+techniques: [T1059, T1218]
+sub_techniques: [T1059.001, T1218.005, T1218.010, T1218.011]
+query_frequency: PT10M
+query_period: PT30M
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  Event
+  | where Source == "Microsoft-Windows-Sysmon" and EventID == 1
+  | extend Image = extract(@'Name="Image">([^<]+)', 1, EventData),
+           CommandLine = extract(@'Name="CommandLine">([^<]+)', 1, EventData),
+           ParentImage = extract(@'Name="ParentImage">([^<]+)', 1, EventData),
+           ParentCommandLine = extract(@'Name="ParentCommandLine">([^<]+)', 1, EventData),
+           User = extract(@'Name="User">([^<]+)', 1, EventData),
+           ProcessId = extract(@'Name="ProcessId">([^<]+)', 1, EventData)
+  | extend ImageName = tolower(tostring(split(Image, "\\")[-1]))
+  | extend Technique = case(
+        ImageName == "certutil.exe" and CommandLine has_any ("-urlcache", "-verifyctl", "-decode"), "certutil download/decode",
+        ImageName == "bitsadmin.exe" and CommandLine has "/transfer", "bitsadmin transfer",
+        ImageName in ("mshta.exe", "regsvr32.exe", "rundll32.exe") and CommandLine has_any ("http://", "https://", "\\\\", "javascript:", "scrobj.dll"), strcat(ImageName, " proxy-exec"),
+        ImageName in ("powershell.exe", "pwsh.exe") and CommandLine has_any ("-enc", "-encodedcommand", "-e ", "frombase64string", "-w hidden", "-windowstyle hidden", "iex", "invoke-expression", "downloadstring", "downloadfile"), "suspicious PowerShell",
+        ImageName == "wmic.exe" and CommandLine has_any ("process call create", "/node:"), "wmic exec",
+        ImageName in ("cscript.exe", "wscript.exe") and CommandLine has_any ("http", ".js", ".vbs"), "script host",
+        "")
+  | where isnotempty(Technique)
+  | project TimeGenerated, Computer, Technique, Image, CommandLine, ParentImage, ParentCommandLine, User, ProcessId
+entity_mappings:
+  - entity_type: Host
+    field_mappings:
+      - identifier: HostName
+        column_name: Computer
+  - entity_type: Account
+    field_mappings:
+      - identifier: Name
+        column_name: User
+  - entity_type: Process
+    field_mappings:
+      - identifier: CommandLine
+        column_name: CommandLine
+custom_details:
+  Technique: Technique
+  Image: Image
+  ParentImage: ParentImage
+alert_details_override:
+  display_name_format: "[SYS-001] {{Technique}} on {{Computer}}"
+simulation: simulate/scenarios/win-sysmon-chain.sh
+false_positives:
+  - Admin scripts and software deployment that legitimately use certutil/bitsadmin/PowerShell. Baseline per host and allowlist known parents.
+references:
+  - https://attack.mitre.org/techniques/T1218/
+  - https://lolbas-project.github.io/
