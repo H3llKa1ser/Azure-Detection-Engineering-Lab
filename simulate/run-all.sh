@@ -26,6 +26,7 @@ scenarios=(
   ent-005-conditional-access-change
   ent-006-high-risk-consent
   net-sim-chain
+  win-sysmon-chain
 )
 
 failed=()
