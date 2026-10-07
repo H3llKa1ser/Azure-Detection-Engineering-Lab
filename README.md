@@ -3,12 +3,12 @@
 [![ci](https://github.com/H3llKa1ser/Azure-Detection-Engineering-Lab/actions/workflows/ci.yml/badge.svg)](https://github.com/H3llKa1ser/Azure-Detection-Engineering-Lab/actions/workflows/ci.yml)
 ![Terraform](https://img.shields.io/badge/terraform-%E2%89%A51.9-7B42BC)
 ![azurerm](https://img.shields.io/badge/azurerm-5.x-0078D4)
-![Detections](https://img.shields.io/badge/detections-26-success)
+![Detections](https://img.shields.io/badge/detections-32-success)
 
 A blue-team lab on Azure, built entirely with Terraform: Microsoft Sentinel,
 instrumented victim hosts, Entra ID identity telemetry, VNet flow logs,
-honeytokens,
-**detections as code**, and an attack simulation harness that proves every
+honeytokens, Sysmon endpoint
+telemetry, **detections as code**, and an attack simulation harness that proves every
 rule actually fires.
 
 The loop this repo is built around:
@@ -40,7 +40,7 @@ flowchart LR
             ST[Storage<br/>canary blob]
             NSGSIM[Unattached NSG<br/>simulation target]
             LAW[(Log Analytics)]
-            SEN[Microsoft Sentinel<br/>up to 26 analytics rules<br/>watchlists + automation]
+            SEN[Microsoft Sentinel<br/>up to 32 analytics rules<br/>watchlists + automation]
         end
     end
     subgraph ENTRA[Entra ID tenant - optional]
@@ -48,7 +48,7 @@ flowchart LR
         CAN[Disabled canary accounts<br/>sim app + sim user]
     end
     SIGN -- SigninLogs / AuditLogs --> LAW
-    WIN -- SecurityEvent via DCR --> LAW
+    WIN -- SecurityEvent + Sysmon via DCR --> LAW
     LNX -- Syslog auth/authpriv via DCR --> LAW
     KV -- AuditEvent --> LAW
     ST -- StorageBlobLogs --> LAW
@@ -62,9 +62,9 @@ flowchart LR
 |---|---|
 | SIEM | Log Analytics workspace (daily cap), Sentinel onboarding |
 | Telemetry | Subscription Activity Log, Key Vault audit, Blob read/write/delete logs, Windows Security events and Linux auth syslog via Azure Monitor Agent + Data Collection Rules, and optionally Entra ID sign-in/audit/risk logs and VNet flow logs enriched by Traffic Analytics |
-| Victims | Windows Server 2022 and Ubuntu 24.04, Trusted Launch, no public IPs, nightly auto-shutdown |
+| Victims | Windows Server 2022 (optionally with Sysmon) and Ubuntu 24.04, Trusted Launch, no public IPs, nightly auto-shutdown |
 | Deception | Canary Key Vault secret, decoy secrets, canary "payroll export" blob, and (Entra layer) disabled canary user accounts |
-| Detections | 26 scheduled analytics rules generated from YAML (14 core + 7 identity + 5 network), mapped to MITRE ATT&CK, with entity mappings, custom details and dynamic severity |
+| Detections | 32 scheduled analytics rules generated from YAML (14 core + 7 identity + 5 network + 6 Sysmon endpoint), mapped to MITRE ATT&CK, with entity mappings, custom details and dynamic severity |
 | Response | Allowlist and honeytoken watchlists, automation rule that labels every incident and attaches a triage task checklist |
 | Simulation | Bash + az CLI scenarios, Windows/Linux attack chains via Run Command, `verify.sh` closes the loop |
 
@@ -100,6 +100,12 @@ Full catalog with ATT&CK links: [`docs/detection-catalog.md`](docs/detection-cat
 | NET-003 | East-west connection to management ports | High | T1021 |
 | NET-004 | Traffic Analytics flagged a malicious flow | High | T1071 |
 | NET-005 | Large outbound data transfer to an external IP | Medium | T1048.003 |
+| SYS-001 | Suspicious LOLBin process creation | High | T1218, T1059.001 |
+| SYS-002 | LSASS access with credential-dumping rights | High | T1003.001 |
+| SYS-003 | Network connection from a LOLBin / interpreter | Medium | T1105 |
+| SYS-004 | Registry Run-key persistence | Medium | T1547.001 |
+| SYS-005 | Remote thread created in another process | High | T1055.002 |
+| SYS-006 | Sysmon config change / service tampering | High | T1562.001 |
 
 The ENT rules are deployed only with `enable_entra_id = true` (ENT-007 also needs
 `entra_id_p2 = true`). Prerequisites, required roles and simulation safety tiers
@@ -109,6 +115,10 @@ The NET rules are deployed only with `enable_flow_logs = true`. They read the
 `NTANetAnalytics` table produced by VNet flow logs + Traffic Analytics; see
 [`docs/network-detections.md`](docs/network-detections.md) for cost, the 10-60 min
 processing latency, and the lateral-movement baseline NET-003 assumes.
+
+The SYS rules are deployed only with `enable_sysmon = true` (needs the Windows
+VM). They read Sysmon events from the `Event` table; see [`docs/sysmon.md`](docs/sysmon.md)
+for the config, the EventData parsing approach, and which simulations are safe.
 
 ## Quick start
 
@@ -141,7 +151,8 @@ To add the identity layer, set `enable_entra_id = true` (and `entra_id_p2 = true
 on a P2 tenant) and re-apply; see [`docs/entra-id.md`](docs/entra-id.md) first.
 To add network detections, set `enable_flow_logs = true` and re-apply; see
 [`docs/network-detections.md`](docs/network-detections.md) (expect 30-75 min
-before flow-log alerts appear).
+before flow-log alerts appear). To add Sysmon endpoint detections, set
+`enable_sysmon = true` and re-apply; see [`docs/sysmon.md`](docs/sysmon.md).
 The scenarios that temporarily change tenant objects only run when you opt in:
 
 ```bash
@@ -176,7 +187,7 @@ picks up every YAML file and turns it into a Sentinel rule, skipping any whose
 |---|---|
 | `scripts/validate_detections.py` | Schema, duplicate IDs, Sentinel limits (frequency/period bounds, entity and field-mapping counts), valid tactic names, ATT&CK ID formats, entity/custom-detail columns that don't exist in the query, missing simulation scripts, stale catalog |
 | `scripts/kql/check.js` | **KQL syntax and semantic analysis** using Microsoft's `Kusto.Language` library against a declared table schema: unknown tables/columns, columns referenced after a `summarize` dropped them, type errors |
-| `terraform test` | Offline plan tests with mocked providers: correct rule counts for every data-source combination (14 / 8 / 19 / 20 / 21), canary accounts disabled and on the watchlist, VNet flow log targets the VNet, no optional resources unless opted in, P2 log categories only with P2, firewalls default-deny, variable validation |
+| `terraform test` | Offline plan tests with mocked providers: correct rule counts for every data-source combination (core 14, no-VM 8, +network 19, +sysmon 20, +Entra 20/21), Sysmon collected into the Event table and gated on the Windows VM, canary accounts disabled and on the watchlist, VNet flow log targets the VNet, no optional resources unless opted in, firewalls default-deny, variable validation |
 | `terraform fmt` / `validate`, `tflint` (+ azurerm ruleset) | Style, schema, retired VM sizes, invalid SKUs |
 | Checkov | IaC misconfigurations; every skip is inline with a written justification |
 | ShellCheck | Simulation scripts |
@@ -229,6 +240,12 @@ an `AlertSeverity` column and the loader wires it to Sentinel's
 `alert_details_override`, which the validator checks (the column must exist, and
 custom alert names must keep the `[ID]` prefix `verify.sh` relies on).
 
+**Sysmon lands in `Event`, not `SecurityEvent`.** AMA collects the Sysmon
+operational channel through the `Microsoft-Event` stream, so the SYS-* rules
+query the `Event` table and pull fields out of the `EventData` XML with
+`extract()`. The config is intentionally compact - it logs only the event types
+the rules use - and `sysmon_config_url` swaps in a fuller one.
+
 **VNet flow logs, not NSG flow logs.** Microsoft retired NSG flow logs in June
 2025. This lab uses VNet flow logs, which attach to the virtual network and
 cover every NIC in it, and reads the `NTANetAnalytics` table that Traffic
@@ -254,9 +271,10 @@ region, and `make destroy` at the end of each session.
 Set `deploy_windows_vm = false` and `deploy_linux_vm = false` for a near-zero-cost,
 cloud-only lab (8 detections: Activity Log, Key Vault, Storage).
 
-The optional layers add cost: Entra ID needs P1/P2 licensing, and Traffic
-Analytics (`enable_flow_logs`) bills for flow-log ingestion and processing - leave
-both off unless you're exercising them.
+The optional layers add cost: Entra ID needs P1/P2 licensing, Traffic Analytics
+(`enable_flow_logs`) bills for flow-log ingestion and processing, and Sysmon
+(`enable_sysmon`) adds `Event`-table ingestion - leave them off unless you're
+exercising them.
 
 ## Security notes
 
@@ -278,6 +296,7 @@ both off unless you're exercising them.
 | Role-assignment scenario fails | Your account needs Owner or User Access Administrator on the lab resource group |
 | ENT-003..006 show MISSING | They only run with `ALLOW_TENANT_CHANGES=1`; a 403 from Graph means the CLI token or your Entra role is insufficient (see [`docs/entra-id.md`](docs/entra-id.md)) |
 | NET-* show MISSING | Traffic Analytics adds 10-60 min processing latency; wait 30-75 min and confirm the `NTANetAnalytics` table has data. NET-004 is not auto-simulated |
+| SYS-* show MISSING | Confirm the `Event` table has `Source == "Microsoft-Windows-Sysmon"` rows; if not, check the install-sysmon Run Command output and that the VM had egress to download Sysmon. SYS-005 is not auto-simulated |
 
 ## Repo layout
 
@@ -285,7 +304,7 @@ both off unless you're exercising them.
 .
 ├── detections/                 # detection-as-code: one YAML per rule
 │   ├── azure-activity/  keyvault/  storage/  windows/  linux/
-│   ├── entra-id/  network/
+│   ├── entra-id/  network/  sysmon/
 │   └── _TEMPLATE.yaml.example
 ├── simulate/
 │   ├── scenarios/              # one script per detection (or chain)
@@ -298,6 +317,7 @@ both off unless you're exercising them.
 │   ├── canaries.tf             # Key Vault, Storage, honeytoken seeding
 │   ├── entra.tf                # Entra ID logs, canary accounts, sim targets
 │   ├── netwatch.tf             # VNet flow logs + Traffic Analytics
+│   ├── sysmon.tf               # Sysmon install + DCR into the Event table
 │   ├── detections.tf           # YAML -> Sentinel rule loader
 │   ├── sentinel.tf             # watchlist, automation rule
 │   ├── tests/plan.tftest.hcl   # offline plan tests
@@ -308,7 +328,8 @@ both off unless you're exercising them.
 ├── docs/
 │   ├── detection-catalog.md    # generated
 │   ├── entra-id.md             # identity layer: prerequisites, roles, safety
-│   └── network-detections.md   # flow logs: cost, latency, tuning
+│   ├── network-detections.md   # flow logs: cost, latency, tuning
+│   └── sysmon.md               # Sysmon: config, EventData parsing, safety
 └── .github/workflows/ci.yml
 ```
 
@@ -317,7 +338,7 @@ both off unless you're exercising them.
 - [x] Entra ID sign-in/audit/risk logs and identity detections ([docs](docs/entra-id.md))
 - [x] VNet flow logs + Traffic Analytics, network detections ([docs](docs/network-detections.md))
 - [ ] Logic App playbook: auto-disable principal on KV-001 / STG-001
-- [ ] Sysmon on the Windows host
+- [x] Sysmon on the Windows host ([docs](docs/sysmon.md))
 - [ ] Atomic Red Team integration for broader technique coverage
 - [ ] Remote state backend + GitHub Actions OIDC deployment
 
