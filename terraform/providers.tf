@@ -37,3 +37,7 @@ provider "azurerm" {
     }
   }
 }
+
+# Entra ID (tenant) resources. Uses the same Azure CLI login; only exercised
+# when enable_entra_id = true.
+provider "azuread" {}
