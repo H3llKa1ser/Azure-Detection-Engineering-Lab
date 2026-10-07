@@ -20,5 +20,10 @@ daily_quota_gb = 1
 enable_entra_id = false
 entra_id_p2     = false
 
+# Network layer - VNet flow logs + Traffic Analytics (adds ingestion cost and
+# 10-60 min processing latency). See docs/network-detections.md.
+enable_flow_logs          = false
+flow_log_interval_minutes = 10
+
 # Break-glass accounts / CI service principals. Do NOT add yourself.
 approved_privileged_callers = []
