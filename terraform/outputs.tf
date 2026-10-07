@@ -71,6 +71,7 @@ resource "local_file" "sim_env" {
     SIM_SP_ID="${var.enable_entra_id ? azuread_service_principal.sim[0].object_id : ""}"
     FLOW_LOGS_ENABLED="${var.enable_flow_logs}"
     VICTIM_SUBNET_CIDR="10.42.1.0/24"
+    SYSMON_ENABLED="${local.sysmon_enabled}"
   ENV
 }
 
