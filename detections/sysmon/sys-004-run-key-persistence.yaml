@@ -1,0 +1,50 @@
+id: SYS-004
+name: Registry Run-key persistence (Sysmon EID 12/13)
+description: |
+  A value was created or modified under a Run / RunOnce key. These keys
+  execute their contents at logon, making them one of the most common
+  persistence mechanisms. Sysmon EID 12 (key/value create) and 13 (value
+  set) capture the change and the data written.
+severity: Medium
+requires: [sysmon]
+tactics: [Persistence]
+techniques: [T1547]
+sub_techniques: [T1547.001]
+query_frequency: PT10M
+query_period: PT30M
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  Event
+  | where Source == "Microsoft-Windows-Sysmon" and EventID in (12, 13)
+  | extend TargetObject = extract(@'Name="TargetObject">([^<]+)', 1, EventData),
+           Details = extract(@'Name="Details">([^<]+)', 1, EventData),
+           Image = extract(@'Name="Image">([^<]+)', 1, EventData),
+           User = extract(@'Name="User">([^<]+)', 1, EventData),
+           EventType = extract(@'Name="EventType">([^<]+)', 1, EventData)
+  | where TargetObject has_any (@"\CurrentVersion\Run", @"\CurrentVersion\RunOnce")
+  | where EventID == 13 or EventType =~ "CreateKey" or isnotempty(Details)
+  | extend ImageName = tolower(tostring(split(Image, "\\")[-1]))
+  | project TimeGenerated, Computer, User, TargetObject, Details, Image, ImageName, EventID
+entity_mappings:
+  - entity_type: Host
+    field_mappings:
+      - identifier: HostName
+        column_name: Computer
+  - entity_type: Account
+    field_mappings:
+      - identifier: Name
+        column_name: User
+  - entity_type: Process
+    field_mappings:
+      - identifier: CommandLine
+        column_name: Image
+custom_details:
+  TargetObject: TargetObject
+  Details: Details
+  ImageName: ImageName
+simulation: simulate/scenarios/win-sysmon-chain.sh
+false_positives:
+  - Installers and updaters add Run entries. Correlate with the writing Image and known software.
+references:
+  - https://attack.mitre.org/techniques/T1547/001/
