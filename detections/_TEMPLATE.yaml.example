@@ -1,13 +1,13 @@
 # Copy to detections/<area>/<id-lowercase>-<slug>.yaml
 # Placeholders available in description/query: ${canary_secret_name},
 # ${canary_blob_name}, ${canary_blob_leaf}, ${key_vault_name}, ${storage_name},
-# ${watchlist_alias}
+# ${watchlist_alias}, ${canary_watchlist_alias}
 id: ABC-001
 name: Short human-readable name
 description: |
   What it detects, why an attacker does it, why it matters.
 severity: Medium            # Informational | Low | Medium | High
-requires: [azure_activity]  # azure_activity | key_vault | storage | windows_vm | linux_vm
+requires: [azure_activity]  # azure_activity | key_vault | storage | windows_vm | linux_vm | entra_id | entra_id_p2
 tactics: [DefenseEvasion]   # Sentinel tactic names (no spaces)
 techniques: [T1562]         # parent technique IDs only
 sub_techniques: [T1562.008] # optional, documentation + catalog
@@ -27,6 +27,10 @@ entity_mappings:
       - identifier: FullName
         column_name: Caller
 custom_details: {}
+# Optional: alert name/severity from query columns. Name must keep the [ID] prefix.
+# alert_details_override:
+#   display_name_format: "[ABC-001] Something happened on {{Computer}}"
+#   severity_column_name: AlertSeverity
 simulation: simulate/scenarios/<script>.sh
 false_positives:
   - ...
