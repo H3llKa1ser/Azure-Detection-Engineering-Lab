@@ -1,0 +1,58 @@
+id: SYS-003
+name: Network connection from a LOLBin or script interpreter (Sysmon EID 3)
+description: |
+  Sysmon recorded an outbound network connection (EID 3) initiated by a
+  process that should rarely make one - a living-off-the-land binary or a
+  script interpreter. certutil, mshta, regsvr32, rundll32 or PowerShell
+  reaching out to the network is a strong download-and-execute / C2 signal.
+severity: Medium
+requires: [sysmon]
+tactics: [CommandAndControl, Exfiltration]
+techniques: [T1071, T1105]
+query_frequency: PT10M
+query_period: PT30M
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  let suspicious_images = dynamic([
+      "certutil.exe", "bitsadmin.exe", "mshta.exe", "regsvr32.exe", "rundll32.exe",
+      "cscript.exe", "wscript.exe", "powershell.exe", "pwsh.exe", "msbuild.exe", "installutil.exe"]);
+  Event
+  | where Source == "Microsoft-Windows-Sysmon" and EventID == 3
+  | extend Image = extract(@'Name="Image">([^<]+)', 1, EventData),
+           DestinationIp = extract(@'Name="DestinationIp">([^<]+)', 1, EventData),
+           DestinationPort = extract(@'Name="DestinationPort">([^<]+)', 1, EventData),
+           DestinationHostname = extract(@'Name="DestinationHostname">([^<]+)', 1, EventData),
+           SourceUser = extract(@'Name="User">([^<]+)', 1, EventData),
+           ProcessId = extract(@'Name="ProcessId">([^<]+)', 1, EventData)
+  | extend ImageName = tolower(tostring(split(Image, "\\")[-1]))
+  | where ImageName in (suspicious_images)
+  // Ignore loopback / link-local noise.
+  | where DestinationIp !startswith "127." and DestinationIp !startswith "169.254." and DestinationIp != "::1"
+  | summarize TimeGenerated = max(TimeGenerated), Connections = count(),
+              DestIps = make_set(DestinationIp, 20), DestPorts = make_set(DestinationPort, 20),
+              DestHosts = make_set(DestinationHostname, 20)
+              by Computer, Image, ImageName, SourceUser
+  | project TimeGenerated, Computer, Image, ImageName, SourceUser, Connections, DestIps, DestPorts, DestHosts
+entity_mappings:
+  - entity_type: Host
+    field_mappings:
+      - identifier: HostName
+        column_name: Computer
+  - entity_type: Account
+    field_mappings:
+      - identifier: Name
+        column_name: SourceUser
+  - entity_type: Process
+    field_mappings:
+      - identifier: CommandLine
+        column_name: Image
+custom_details:
+  ImageName: ImageName
+  DestIps: DestIps
+  DestPorts: DestPorts
+simulation: simulate/scenarios/win-sysmon-chain.sh
+false_positives:
+  - PowerShell modules that legitimately call web services, and installer tooling. Allowlist by destination or signed script path.
+references:
+  - https://attack.mitre.org/techniques/T1105/
