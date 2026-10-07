@@ -69,6 +69,8 @@ resource "local_file" "sim_env" {
     SIM_ROLE_TARGET_ID="${var.enable_entra_id ? azuread_user.sim_role_target[0].object_id : ""}"
     SIM_APP_ID="${var.enable_entra_id ? azuread_application.sim[0].client_id : ""}"
     SIM_SP_ID="${var.enable_entra_id ? azuread_service_principal.sim[0].object_id : ""}"
+    FLOW_LOGS_ENABLED="${var.enable_flow_logs}"
+    VICTIM_SUBNET_CIDR="10.42.1.0/24"
   ENV
 }
 
