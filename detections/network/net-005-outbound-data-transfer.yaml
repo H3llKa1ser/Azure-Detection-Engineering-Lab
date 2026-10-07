@@ -1,0 +1,55 @@
+id: NET-005
+name: Large outbound data transfer to an external IP
+description: |
+  A lab host sent an unusually large volume of data to a single external
+  (non-Azure, public) destination within the interval - a possible
+  exfiltration or staging-to-cloud event. Uses the byte counters Traffic
+  Analytics records per aggregated flow.
+severity: Medium
+requires: [flow_logs]
+tactics: [Exfiltration]
+techniques: [T1048]
+sub_techniques: [T1048.003]
+query_frequency: PT30M
+query_period: PT1H
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  // Lab threshold (100 MB). Tune to normal egress per host in production,
+  // ideally as a deviation from each host's own baseline.
+  let byte_threshold = 100 * 1024 * 1024;
+  NTANetAnalytics
+  | where SubType == "FlowLog"
+  | where FlowDirection == "Outbound" and FlowStatus == "Allowed"
+  // External public destinations only - ignore intra-Azure and private ranges.
+  | where FlowType in ("ExternalPublic", "AzurePublic", "S2S", "P2S")
+  | where isnotempty(SrcVm)
+  | summarize BytesOut = sum(BytesSrcToDest), Flows = sum(AllowedOutFlows),
+              Ports = make_set(DestPort, 20), L7 = make_set(L7Protocol, 10),
+              Countries = make_set(Country, 10), DestIps = make_set(DestIp, 20),
+              FirstSeen = min(FlowStartTime), LastSeen = max(FlowEndTime)
+              by SrcVm, SrcIp, DestIp
+  | where BytesOut >= byte_threshold
+  | extend BytesOutMB = round(BytesOut / 1024.0 / 1024.0, 1)
+  | project TimeGenerated = LastSeen, FirstSeen, SrcVm, SrcIp, DestIp, BytesOutMB, Flows,
+            Ports, L7, Countries
+entity_mappings:
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: SrcIp
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: DestIp
+custom_details:
+  BytesOutMB: BytesOutMB
+  Ports: Ports
+  Countries: Countries
+alert_details_override:
+  display_name_format: "[NET-005] {{SrcVm}} sent {{BytesOutMB}} MB to {{DestIp}}"
+simulation: simulate/scenarios/net-sim-chain.sh
+false_positives:
+  - Backups, container/image pulls and pushes, OS and app updates, telemetry. Allowlist known endpoints and raise the threshold.
+references:
+  - https://attack.mitre.org/techniques/T1048/003/
