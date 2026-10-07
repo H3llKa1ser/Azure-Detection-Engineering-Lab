@@ -37,6 +37,8 @@ TEMPLATE_VARS = {
     "storage_name": "st<prefix><suffix>",
     "watchlist_alias": "LabApprovedPrivilegedCallers",
     "canary_watchlist_alias": "LabCanaryAccounts",
+    "victim_subnet_cidr": "10.42.1.0/24",
+    "internal_mgmt_ports": "22, 3389, 5985, 5986, 445, 135, 1433, 3306, 5432, 6379, 27017",
 }
 
 REQUIRED = [
@@ -44,7 +46,7 @@ REQUIRED = [
     "query_frequency", "query_period", "query", "entity_mappings", "simulation",
 ]
 SEVERITIES = {"Informational", "Low", "Medium", "High"}
-SOURCES = {"azure_activity", "key_vault", "storage", "windows_vm", "linux_vm", "entra_id", "entra_id_p2"}
+SOURCES = {"azure_activity", "key_vault", "storage", "windows_vm", "linux_vm", "entra_id", "entra_id_p2", "flow_logs"}
 OVERRIDE_KEYS = {"display_name_format", "description_format", "severity_column_name", "tactics_column_name"}
 # Kill-chain order (a list, not a set, so generated output is deterministic).
 TACTIC_ORDER = [
