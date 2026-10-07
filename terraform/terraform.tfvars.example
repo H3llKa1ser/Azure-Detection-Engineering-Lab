@@ -25,5 +25,10 @@ entra_id_p2     = false
 enable_flow_logs          = false
 flow_log_interval_minutes = 10
 
+# Sysmon on the Windows victim (needs deploy_windows_vm = true). Adds Event-table
+# ingestion. Empty sysmon_config_url uses the compact built-in config.
+enable_sysmon     = false
+sysmon_config_url = ""
+
 # Break-glass accounts / CI service principals. Do NOT add yourself.
 approved_privileged_callers = []
