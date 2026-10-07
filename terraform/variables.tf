@@ -118,3 +118,26 @@ variable "entra_id_p2" {
     error_message = "entra_id_p2 requires enable_entra_id = true."
   }
 }
+
+variable "enable_flow_logs" {
+  description = "Deploy VNet flow logs + Traffic Analytics (NTANetAnalytics table) and the network detections. Adds Traffic Analytics ingestion cost and 10-60 min processing latency."
+  type        = bool
+  default     = false
+}
+
+variable "flow_log_interval_minutes" {
+  description = "Traffic Analytics processing interval: 10 (lower detection latency) or 60 (lower cost)."
+  type        = number
+  default     = 10
+
+  validation {
+    condition     = contains([10, 60], var.flow_log_interval_minutes)
+    error_message = "flow_log_interval_minutes must be 10 or 60."
+  }
+}
+
+variable "internal_mgmt_ports" {
+  description = "Ports treated as lateral-movement / management ports by NET-003 (east-west scanning)."
+  type        = list(number)
+  default     = [22, 3389, 5985, 5986, 445, 135, 1433, 3306, 5432, 6379, 27017]
+}
