@@ -53,3 +53,19 @@ let AADUserRiskEvents = datatable(
     IpAddress:string, Location:dynamic, RiskLevel:string, RiskEventType:string, RiskState:string,
     RiskDetail:string, DetectionTimingType:string, Source:string, Id:string)[];
 let _GetWatchlist = (watchlistAlias:string) { datatable(SearchKey:string, Caller:string, Reason:string, UserPrincipalName:string, ObjectId:string, Purpose:string)[] };
+
+// Traffic Analytics enriched flow records (VNet flow logs). Subset of the
+// documented NTANetAnalytics columns used by the NET-* detections.
+let NTANetAnalytics = datatable(
+    TimeGenerated:datetime, SubType:string, FaSchemaVersion:string, Type:string,
+    FlowType:string, FlowDirection:string, FlowStatus:string, L4Protocol:string, L7Protocol:string,
+    SrcIp:string, DestIp:string, DestPort:int, SrcPorts:string,
+    SrcVm:string, DestVm:string, SrcNic:string, DestNic:string, SrcSubnet:string, DestSubnet:string,
+    SrcRegion:string, DestRegion:string, SrcSubscription:string, DestSubscription:string,
+    SrcPublicIps:string, DestPublicIps:string, Country:string, AzureRegion:string,
+    AllowedInFlows:long, AllowedOutFlows:long, DeniedInFlows:long, DeniedOutFlows:long,
+    BytesSrcToDest:long, BytesDestToSrc:long, PacketsSrcToDest:long, PacketsDestToSrc:long,
+    CompletedFlows:long, RecordCount:long, FlowStartTime:datetime, FlowEndTime:datetime,
+    FlowIntervalStartTime:datetime, FlowIntervalEndTime:datetime,
+    AclGroup:string, AclRule:string, NsgList:string, NsgRule:string,
+    TargetResourceId:string, TargetResourceType:string, FlowLogResourceId:string, LogResourceId:string)[];
