@@ -1,0 +1,49 @@
+id: NET-004
+name: Traffic Analytics flagged a malicious flow
+description: |
+  Traffic Analytics classified a flow as malicious (FlowType "MaliciousFlow")
+  or tagged it against a known-malicious IP. Microsoft enriches flows with its
+  threat-intelligence feed, so this surfaces C2 / known-bad communication to
+  or from a lab host without maintaining your own IOC list.
+severity: High
+requires: [flow_logs]
+tactics: [CommandAndControl, Exfiltration]
+techniques: [T1071]
+query_frequency: PT30M
+query_period: PT1H
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  NTANetAnalytics
+  | where SubType == "FlowLog"
+  | where FlowType == "MaliciousFlow"
+  | extend InternalIp = iff(isnotempty(SrcVm), SrcIp, DestIp),
+           ExternalIp = iff(isnotempty(SrcVm), DestIp, SrcIp),
+           Direction  = iff(isnotempty(SrcVm), "outbound", "inbound")
+  | summarize TimeGenerated = max(FlowEndTime), FirstSeen = min(FlowStartTime),
+              Flows = sum(AllowedInFlows + AllowedOutFlows + DeniedInFlows + DeniedOutFlows),
+              BytesOut = sum(BytesSrcToDest), BytesIn = sum(BytesDestToSrc),
+              Ports = make_set(DestPort, 20), L7 = make_set(L7Protocol, 10),
+              Countries = make_set(Country, 10)
+              by InternalIp, ExternalIp, Direction, SrcVm, DestVm
+  | project TimeGenerated, FirstSeen, Direction, InternalIp, ExternalIp, SrcVm, DestVm,
+            Flows, BytesOut, BytesIn, Ports, L7, Countries
+entity_mappings:
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: ExternalIp
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: InternalIp
+custom_details:
+  Direction: Direction
+  Countries: Countries
+  Ports: Ports
+simulation: simulate/scenarios/net-sim-chain.sh
+false_positives:
+  - Threat-intel feeds carry occasional false positives (shared hosting, sinkholes). Confirm the external IP before escalating.
+references:
+  - https://attack.mitre.org/techniques/T1071/
+  - https://learn.microsoft.com/azure/network-watcher/traffic-analytics
