@@ -40,5 +40,7 @@ locals {
     storage_name           = "st${var.prefix}${local.suffix}"
     watchlist_alias        = "LabApprovedPrivilegedCallers"
     canary_watchlist_alias = "LabCanaryAccounts"
+    victim_subnet_cidr     = "10.42.1.0/24"
+    internal_mgmt_ports    = join(", ", [for p in var.internal_mgmt_ports : tostring(p)])
   }
 }
