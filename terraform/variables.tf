@@ -101,3 +101,20 @@ variable "use_nat_gateway" {
   type        = bool
   default     = false
 }
+
+variable "enable_entra_id" {
+  description = "Stream Entra ID sign-in and audit logs into the workspace and deploy the identity detections, canary accounts and simulation app. Requires Entra ID P1 or P2 and tenant-level admin rights (see README)."
+  type        = bool
+  default     = false
+}
+
+variable "entra_id_p2" {
+  description = "Tenant has Entra ID P2: also stream Identity Protection risk logs and deploy the risk-based detection. Requires enable_entra_id = true."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.entra_id_p2 || var.enable_entra_id
+    error_message = "entra_id_p2 requires enable_entra_id = true."
+  }
+}
