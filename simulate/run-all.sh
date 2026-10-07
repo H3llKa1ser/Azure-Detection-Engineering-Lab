@@ -25,6 +25,7 @@ scenarios=(
   ent-004-privileged-directory-role
   ent-005-conditional-access-change
   ent-006-high-risk-consent
+  net-sim-chain
 )
 
 failed=()
