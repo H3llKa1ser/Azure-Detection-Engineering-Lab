@@ -1,0 +1,54 @@
+id: NET-003
+name: East-west connection to management ports between internal hosts
+description: |
+  An internal host connected (allowed) to management/remote-admin ports
+  (SSH, RDP, WinRM, SMB, RPC, SQL, Redis, Mongo) on one or more other
+  internal hosts. In this lab the victim subnet has no legitimate east-west
+  management traffic, so an allowed internal admin-port flow is a strong
+  lateral-movement signal. Tune the baseline before using this pattern in
+  production, where jump hosts and management stations are expected.
+severity: High
+requires: [flow_logs]
+tactics: [LateralMovement, Discovery]
+techniques: [T1021]
+sub_techniques: [T1021.001, T1021.002, T1021.004, T1021.006]
+query_frequency: PT30M
+query_period: PT1H
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  let mgmt_ports = dynamic([${internal_mgmt_ports}]);
+  let victim_cidr = "${victim_subnet_cidr}";
+  NTANetAnalytics
+  | where SubType == "FlowLog"
+  | where FlowStatus == "Allowed"
+  | where DestPort in (mgmt_ports)
+  // Both ends internal to the victim subnet = east-west, not operator-to-host.
+  | where ipv4_is_in_range(SrcIp, victim_cidr) and ipv4_is_in_range(DestIp, victim_cidr)
+  | where SrcIp != DestIp
+  | extend PortRole = case(
+        DestPort in (22), "SSH", DestPort in (3389), "RDP",
+        DestPort in (5985, 5986), "WinRM", DestPort in (445, 135), "SMB/RPC",
+        DestPort in (1433, 3306, 5432), "SQL", DestPort in (6379, 27017), "NoSQL",
+        tostring(DestPort))
+  | summarize DistinctTargets = dcount(DestIp), Targets = make_set(DestIp, 50),
+              Ports = make_set(DestPort), PortRoles = make_set(PortRole),
+              AllowedFlows = sum(AllowedInFlows + AllowedOutFlows),
+              FirstSeen = min(FlowStartTime), LastSeen = max(FlowEndTime)
+              by SrcIp
+  | project TimeGenerated = LastSeen, FirstSeen, SrcIp, DistinctTargets, Targets,
+            Ports, PortRoles, AllowedFlows
+entity_mappings:
+  - entity_type: IP
+    field_mappings:
+      - identifier: Address
+        column_name: SrcIp
+custom_details:
+  DistinctTargets: DistinctTargets
+  PortRoles: PortRoles
+  Targets: Targets
+simulation: simulate/scenarios/net-sim-chain.sh
+false_positives:
+  - Jump hosts, management stations, clustering/replication traffic. Baseline per environment and allowlist known admin sources.
+references:
+  - https://attack.mitre.org/techniques/T1021/
