@@ -1,0 +1,62 @@
+id: SYS-002
+name: LSASS process access with credential-dumping rights (Sysmon EID 10)
+description: |
+  A process opened a handle to lsass.exe with an access mask that allows
+  reading its memory (PROCESS_VM_READ and friends). lsass holds credential
+  material, so this is the core signal of credential dumping (Mimikatz,
+  comsvcs MiniDump, procdump). Known-good accessors (AV, the OS) are excluded.
+severity: High
+requires: [sysmon]
+tactics: [CredentialAccess]
+techniques: [T1003]
+sub_techniques: [T1003.001]
+query_frequency: PT5M
+query_period: PT30M
+trigger_operator: GreaterThan
+trigger_threshold: 0
+query: |
+  // Access masks that include VM_READ (0x10) - enough to dump lsass memory.
+  let dump_access = dynamic(["0x1010", "0x1410", "0x1438", "0x143a", "0x1fffff", "0x1f3fff", "0x1f1fff", "0x1f2fff"]);
+  // Signed OS/AV components that routinely touch lsass.
+  let benign_accessors = dynamic([
+      "wininit.exe", "lsass.exe", "csrss.exe", "services.exe", "msmpeng.exe",
+      "mssense.exe", "senseir.exe", "windefend.exe", "sgrmbroker.exe", "taskmgr.exe"]);
+  Event
+  | where Source == "Microsoft-Windows-Sysmon" and EventID == 10
+  | extend TargetImage = extract(@'Name="TargetImage">([^<]+)', 1, EventData)
+  | where tolower(TargetImage) endswith "\\lsass.exe"
+  | extend SourceImage = extract(@'Name="SourceImage">([^<]+)', 1, EventData),
+           GrantedAccess = tolower(extract(@'Name="GrantedAccess">([^<]+)', 1, EventData)),
+           SourceProcessId = extract(@'Name="SourceProcessId">([^<]+)', 1, EventData),
+           CallTrace = extract(@'Name="CallTrace">([^<]+)', 1, EventData),
+           SourceUser = extract(@'Name="SourceUser">([^<]+)', 1, EventData)
+  | extend SourceImageName = tolower(tostring(split(SourceImage, "\\")[-1]))
+  | where SourceImageName !in (benign_accessors)
+  | where GrantedAccess in (dump_access)
+  // Call trace stepping through UNKNOWN memory often indicates unsigned/injected code.
+  | extend SuspiciousCallTrace = CallTrace has "UNKNOWN"
+  | project TimeGenerated, Computer, SourceImage, SourceImageName, GrantedAccess, SourceProcessId,
+            SourceUser, SuspiciousCallTrace, CallTrace
+entity_mappings:
+  - entity_type: Host
+    field_mappings:
+      - identifier: HostName
+        column_name: Computer
+  - entity_type: Account
+    field_mappings:
+      - identifier: Name
+        column_name: SourceUser
+  - entity_type: Process
+    field_mappings:
+      - identifier: CommandLine
+        column_name: SourceImage
+custom_details:
+  GrantedAccess: GrantedAccess
+  SourceImage: SourceImage
+  SuspiciousCallTrace: SuspiciousCallTrace
+simulation: simulate/scenarios/win-sysmon-chain.sh
+false_positives:
+  - EDR/AV and some backup or performance tools read lsass. Add their signed images to benign_accessors.
+references:
+  - https://attack.mitre.org/techniques/T1003/001/
+  - https://learn.microsoft.com/sysinternals/downloads/sysmon
