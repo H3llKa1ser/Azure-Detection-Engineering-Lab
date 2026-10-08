@@ -28,6 +28,12 @@ mock_provider "http" {
 mock_provider "local" {}
 
 mock_provider "azuread" {
+  mock_data "azuread_service_principal" {
+    defaults = {
+      object_id    = "33333333-3333-3333-3333-333333333333"
+      app_role_ids = { "User.ReadWrite.All" = "741f803b-c850-494e-b5df-cde7c675a1ca" }
+    }
+  }
   mock_data "azuread_domains" {
     defaults = {
       domains = [{
@@ -295,6 +301,82 @@ run "sysmon_off_by_default" {
   assert {
     condition     = !contains(keys(azurerm_sentinel_alert_rule_scheduled.detection), "SYS-002")
     error_message = "Sysmon detections must not deploy by default."
+  }
+}
+
+run "response_playbook_off_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(azurerm_resource_group_template_deployment.disable_principal) == 0
+    error_message = "No playbook should be deployed unless enable_response_playbook = true."
+  }
+
+  assert {
+    condition     = length(azurerm_sentinel_automation_rule.honeytoken_response) == 0
+    error_message = "No honeytoken-response automation rule by default."
+  }
+}
+
+run "response_playbook_deploys_and_wires_automation" {
+  command = plan
+
+  variables {
+    enable_response_playbook = true
+  }
+
+  assert {
+    condition     = length(azurerm_resource_group_template_deployment.disable_principal) == 1
+    error_message = "The playbook ARM deployment should be planned when enabled."
+  }
+
+  assert {
+    condition     = length(azurerm_sentinel_automation_rule.honeytoken_response) == 1
+    error_message = "The automation rule should be planned (playbook_auto_run defaults true)."
+  }
+
+  assert {
+    condition     = length(azurerm_role_assignment.playbook_sentinel_responder) == 1
+    error_message = "The playbook MI should get Sentinel Responder on the workspace."
+  }
+
+  assert {
+    condition     = length(azuread_app_role_assignment.playbook_user_readwrite) == 0
+    error_message = "The Graph grant must NOT be made unless playbook_grant_graph = true (default dry-run)."
+  }
+}
+
+run "response_playbook_enforcing_grants_graph" {
+  command = plan
+
+  variables {
+    enable_response_playbook = true
+    playbook_dry_run         = false
+    playbook_grant_graph     = true
+  }
+
+  assert {
+    condition     = length(azuread_app_role_assignment.playbook_user_readwrite) == 1
+    error_message = "With enforcing + grant opted in, the Graph User.ReadWrite.All app role should be assigned to the playbook MI."
+  }
+}
+
+run "response_playbook_manual_only_skips_automation" {
+  command = plan
+
+  variables {
+    enable_response_playbook = true
+    playbook_auto_run        = false
+  }
+
+  assert {
+    condition     = length(azurerm_resource_group_template_deployment.disable_principal) == 1 && length(azurerm_sentinel_automation_rule.honeytoken_response) == 0
+    error_message = "With auto-run off, deploy the playbook but not the automation rule."
+  }
+
+  assert {
+    condition     = length(azurerm_role_assignment.sentinel_automation) == 0
+    error_message = "Sentinel automation RBAC is only needed when the automation rule exists."
   }
 }
 
