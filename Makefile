@@ -19,6 +19,7 @@ destroy: ## Tear the whole lab down
 
 lint: ## Detection lint + KQL analysis + terraform fmt/validate + tflint + shellcheck
 	python3 scripts/validate_detections.py --check-catalog
+	@for f in terraform/playbooks/*.json; do python3 -c "import json; json.load(open('$$f'))" && echo "ok $$f"; done
 	cd scripts/kql && ([ -d node_modules ] || npm ci --silent) && node check.js
 	$(TF) fmt -check -recursive
 	$(TF) validate
