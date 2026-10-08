@@ -20,6 +20,8 @@ jobs:
       - run: pip install pyyaml
       - name: Schema, limits and ATT&CK mapping
         run: python scripts/validate_detections.py --check-catalog
+      - name: Atomic Red Team coverage map
+        run: python scripts/validate_atomics.py
       - name: Playbook ARM templates are valid JSON
         run: |
           for f in terraform/playbooks/*.json; do
