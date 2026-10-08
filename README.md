@@ -8,7 +8,7 @@
 A blue-team lab on Azure, built entirely with Terraform: Microsoft Sentinel,
 instrumented victim hosts, Entra ID identity telemetry, VNet flow logs,
 honeytokens, Sysmon endpoint
-telemetry, **detections as code**, and an attack simulation harness that proves every
+telemetry, Atomic Red Team coverage, **detections as code**, and an attack simulation harness that proves every
 rule actually fires.
 
 The loop this repo is built around:
@@ -69,6 +69,7 @@ flowchart LR
 | Detections | 32 scheduled analytics rules generated from YAML (14 core + 7 identity + 5 network + 6 Sysmon endpoint), mapped to MITRE ATT&CK, with entity mappings, custom details and dynamic severity |
 | Response | Allowlist and honeytoken watchlists, automation rule that labels every incident and attaches a triage task checklist, and an optional SOAR playbook that auto-disables the principal on a honeytoken hit |
 | Simulation | Bash + az CLI scenarios, Windows/Linux attack chains via Run Command, `verify.sh` closes the loop |
+| Technique coverage | Atomic Red Team tests mapped to detections (`simulate/atomic/`), validated against the detection library in CI |
 
 ## Detections
 
@@ -171,6 +172,18 @@ triage tasks.
 make destroy       # when you're done - everything is disposable
 ```
 
+To broaden technique coverage with Atomic Red Team (purple-team style - fire a
+real technique, confirm the rule alerts):
+
+```bash
+./simulate/atomic/install-atomics.sh                                  # one-time
+ALLOW_ATOMIC_TESTS=1 ./simulate/atomic/run-atomics.sh --risk safe     # opt-in, lab only
+make verify
+```
+
+See [`docs/atomic-red-team.md`](docs/atomic-red-team.md) for the coverage map, GUID
+pinning and risk tiers.
+
 ## Adding a detection
 
 1. Copy [`detections/_TEMPLATE.yaml.example`](detections/_TEMPLATE.yaml.example) to
@@ -191,6 +204,7 @@ picks up every YAML file and turns it into a Sentinel rule, skipping any whose
 |---|---|
 | `scripts/validate_detections.py` | Schema, duplicate IDs, Sentinel limits (frequency/period bounds, entity and field-mapping counts), valid tactic names, ATT&CK ID formats, entity/custom-detail columns that don't exist in the query, missing simulation scripts, stale catalog |
 | Playbook ARM templates | Validated as JSON in CI (`terraform/playbooks/*.json`) |
+| `scripts/validate_atomics.py` | Atomic Red Team map: every entry ties to a real detection and a technique it declares; reports endpoint coverage |
 | `scripts/kql/check.js` | **KQL syntax and semantic analysis** using Microsoft's `Kusto.Language` library against a declared table schema: unknown tables/columns, columns referenced after a `summarize` dropped them, type errors |
 | `terraform test` | Offline plan tests with mocked providers: correct rule counts for every data-source combination (core 14, no-VM 8, +network 19, +sysmon 20, +Entra 20/21), Sysmon collected into the Event table and gated on the Windows VM, canary accounts disabled and on the watchlist, VNet flow log targets the VNet, no optional resources unless opted in, firewalls default-deny, variable validation |
 | `terraform fmt` / `validate`, `tflint` (+ azurerm ruleset) | Style, schema, retired VM sizes, invalid SKUs |
@@ -244,6 +258,14 @@ one being deleted are the same detection but not the same page. ENT-005 computes
 an `AlertSeverity` column and the loader wires it to Sentinel's
 `alert_details_override`, which the validator checks (the column must exist, and
 custom alert names must keep the `[ID]` prefix `verify.sh` relies on).
+
+**Atomic Red Team is mapped, not bolted on.** Rather than "run every atomic",
+`simulate/atomic/atomic-map.yaml` ties each test to the detection it should
+trigger, and `scripts/validate_atomics.py` fails CI if an entry names a
+detection that doesn't exist or a technique that detection doesn't declare - so
+a green atomic run means *your* rules fired. Tests are pinned by
+`auto_generated_guid` (stable; test numbers aren't), and unverified ones are
+left unpinned so the map never claims a test identity it hasn't confirmed.
 
 **SOAR response ships in dry-run.** The auto-disable playbook (KV-001 / STG-001 ->
 disable the Entra ID principal) defaults to commenting *"would disable X"* instead
@@ -323,6 +345,7 @@ exercising them.
 ├── simulate/
 │   ├── scenarios/              # one script per detection (or chain)
 │   ├── payloads/               # PowerShell / bash executed via Run Command
+│   ├── atomic/                 # Atomic Red Team map + install/run scripts
 │   ├── run-all.sh  verify.sh
 │   └── lib/common.sh
 ├── terraform/
@@ -340,13 +363,15 @@ exercising them.
 │   └── scripts/seed-honeytokens.sh
 ├── scripts/
 │   ├── validate_detections.py  # lint + catalog generator
+│   ├── validate_atomics.py     # Atomic Red Team coverage map validator
 │   └── kql/                    # Kusto.Language semantic checker + schema
 ├── docs/
 │   ├── detection-catalog.md    # generated
 │   ├── entra-id.md             # identity layer: prerequisites, roles, safety
 │   ├── network-detections.md   # flow logs: cost, latency, tuning
 │   ├── sysmon.md               # Sysmon: config, EventData parsing, safety
-│   └── response-playbook.md    # SOAR playbook: dry-run model, Graph grant
+│   ├── response-playbook.md    # SOAR playbook: dry-run model, Graph grant
+│   └── atomic-red-team.md      # ART map, GUID pinning, risk tiers
 └── .github/workflows/ci.yml
 ```
 
@@ -356,7 +381,7 @@ exercising them.
 - [x] VNet flow logs + Traffic Analytics, network detections ([docs](docs/network-detections.md))
 - [x] Logic App playbook: auto-disable principal on KV-001 / STG-001 ([docs](docs/response-playbook.md))
 - [x] Sysmon on the Windows host ([docs](docs/sysmon.md))
-- [ ] Atomic Red Team integration for broader technique coverage
+- [x] Atomic Red Team integration for broader technique coverage ([docs](docs/atomic-red-team.md))
 - [ ] Remote state backend + GitHub Actions OIDC deployment
 
 ## Disclaimer
