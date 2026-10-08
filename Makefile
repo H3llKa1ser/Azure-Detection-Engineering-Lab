@@ -19,15 +19,19 @@ destroy: ## Tear the whole lab down
 
 lint: ## Detection lint + KQL analysis + terraform fmt/validate + tflint + shellcheck
 	python3 scripts/validate_detections.py --check-catalog
+	python3 scripts/validate_atomics.py
 	@for f in terraform/playbooks/*.json; do python3 -c "import json; json.load(open('$$f'))" && echo "ok $$f"; done
 	cd scripts/kql && ([ -d node_modules ] || npm ci --silent) && node check.js
 	$(TF) fmt -check -recursive
 	$(TF) validate
 	cd terraform && tflint --format compact
-	shellcheck simulate/*.sh simulate/lib/*.sh simulate/scenarios/*.sh simulate/payloads/*.sh terraform/scripts/*.sh
+	shellcheck simulate/*.sh simulate/lib/*.sh simulate/scenarios/*.sh simulate/payloads/*.sh simulate/atomic/*.sh terraform/scripts/*.sh
 
 test: ## Offline terraform tests (mocked providers, no Azure creds)
 	$(TF) test
+
+atomics: ## Validate the Atomic Red Team coverage map
+	python3 scripts/validate_atomics.py
 
 kql: ## KQL analysis only
 	cd scripts/kql && ([ -d node_modules ] || npm ci --silent) && node check.js
