@@ -72,10 +72,21 @@ resource "local_file" "sim_env" {
     FLOW_LOGS_ENABLED="${var.enable_flow_logs}"
     VICTIM_SUBNET_CIDR="10.42.1.0/24"
     SYSMON_ENABLED="${local.sysmon_enabled}"
+    RESPONSE_PLAYBOOK="${local.response_enabled ? local.playbook_name : ""}"
   ENV
 }
 
 output "entra_canary_accounts" {
   description = "Disabled honeytoken accounts. Any sign-in attempt raises ENT-002."
   value       = [for u in azuread_user.canary : u.user_principal_name]
+}
+
+output "response_playbook_name" {
+  description = "The auto-disable-principal Logic App, when deployed."
+  value       = local.response_enabled ? local.playbook_name : null
+}
+
+output "response_playbook_dry_run" {
+  description = "Whether the playbook is in dry-run (comment only) or enforcing."
+  value       = local.response_enabled ? var.playbook_dry_run : null
 }
