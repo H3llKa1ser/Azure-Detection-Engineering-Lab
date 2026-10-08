@@ -20,6 +20,11 @@ jobs:
       - run: pip install pyyaml
       - name: Schema, limits and ATT&CK mapping
         run: python scripts/validate_detections.py --check-catalog
+      - name: Playbook ARM templates are valid JSON
+        run: |
+          for f in terraform/playbooks/*.json; do
+            python -c "import json,sys; json.load(open('$f')); print('ok', '$f')"
+          done
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
