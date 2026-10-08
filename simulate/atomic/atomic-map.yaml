@@ -1,0 +1,132 @@
+# Atomic Red Team coverage map.
+#
+# Maps the lab's detections to Atomic Red Team (ART) tests that should trigger
+# them. The runner (run-atomics.sh) executes each entry on the right victim via
+# Run Command, calling Invoke-AtomicTest with -GetPrereqs, then the test, then
+# -Cleanup.
+#
+# Pinning:
+#   guid: <auto_generated_guid>  pins an exact ART test (stable across releases;
+#                                test NUMBERS are not, so never pin by number).
+#   guid: null                   the GUID is not pinned here - you MUST review
+#                                the technique's tests and choose one before
+#                                running. The runner refuses null-GUID entries
+#                                unless you pass --allow-unpinned, and even then
+#                                runs the technique's DEFAULT test only after you
+#                                confirm. Pin the GUID once you've chosen.
+#
+# Only GUIDs verified against the public atomics repo are pinned below; the rest
+# are intentionally null so this file never claims a test identity it hasn't
+# confirmed. Fill them in with:
+#   Invoke-AtomicTest <technique> -ShowDetailsBrief   # lists tests + GUIDs
+#
+# risk tiers:
+#   safe      benign, self-cleaning, no lasting change
+#   moderate  real attacker behaviour; reverts via -Cleanup
+#   high      touches sensitive subsystems (lsass, injection, log clearing);
+#             lab-only, may not fully clean up
+#
+# scripts/validate_atomics.py checks every `detection` exists, every `technique`
+# is one that detection declares, GUIDs are well-formed, and reports detections
+# with no atomic coverage. It runs in CI (no Azure needed).
+version: 1
+tests:
+  # --- Pinned (GUIDs verified against redcanaryco/atomic-red-team) -----------
+  - detection: SYS-004
+    name: "Reg Key Run"
+    technique: T1547.001
+    guid: e55be3fd-3521-4610-9d1a-e210e42dcf05
+    platform: windows
+    risk: safe
+    elevation_required: false
+    cleanup: true
+  - detection: SYS-004
+    name: "SystemBC Malware-as-a-Service Registry (Run key via PowerShell)"
+    technique: T1547.001
+    guid: 9dc7767b-30c1-4cc4-b999-50cab5e27891
+    platform: windows
+    risk: safe
+    elevation_required: false
+    cleanup: true
+
+  # --- Unpinned: choose a test with -ShowDetailsBrief, then set the guid -----
+  - detection: WIN-004
+    name: "Clear Windows Security event logs (wevtutil cl)"
+    technique: T1070.001
+    guid: null
+    platform: windows
+    risk: moderate
+    elevation_required: true
+    cleanup: false
+  - detection: SYS-006
+    name: "Disable/unload Sysmon"
+    technique: T1562.001
+    guid: null
+    platform: windows
+    risk: high
+    elevation_required: true
+    cleanup: false
+  - detection: SYS-002
+    name: "Dump LSASS memory"
+    technique: T1003.001
+    guid: null
+    platform: windows
+    risk: high
+    elevation_required: true
+    cleanup: true
+  - detection: SYS-005
+    name: "Process injection (CreateRemoteThread / shellcode)"
+    technique: T1055.002
+    guid: null
+    platform: windows
+    risk: high
+    elevation_required: true
+    cleanup: false
+  - detection: SYS-001
+    name: "Mshta executes script"
+    technique: T1218.005
+    guid: null
+    platform: windows
+    risk: moderate
+    elevation_required: false
+    cleanup: false
+  - detection: SYS-001
+    name: "Regsvr32 remote scriptlet (Squiblydoo)"
+    technique: T1218.010
+    guid: null
+    platform: windows
+    risk: moderate
+    elevation_required: false
+    cleanup: false
+  - detection: SYS-001
+    name: "PowerShell download cradle"
+    technique: T1059.001
+    guid: null
+    platform: windows
+    risk: moderate
+    elevation_required: false
+    cleanup: false
+  - detection: WIN-003
+    name: "Add account to local Administrators group"
+    technique: T1098
+    guid: null
+    platform: windows
+    risk: moderate
+    elevation_required: true
+    cleanup: true
+  - detection: LNX-001
+    name: "SSH brute force"
+    technique: T1110
+    guid: null
+    platform: linux
+    risk: moderate
+    elevation_required: false
+    cleanup: false
+  - detection: LNX-002
+    name: "Add user to privileged (sudo) group"
+    technique: T1098
+    guid: null
+    platform: linux
+    risk: moderate
+    elevation_required: true
+    cleanup: true
