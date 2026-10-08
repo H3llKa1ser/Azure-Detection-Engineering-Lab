@@ -55,6 +55,8 @@ flowchart LR
     AL -- AzureActivity --> LAW
     VNET -- VNet flow logs + Traffic Analytics --> LAW
     LAW --> SEN
+    SEN -. KV-001 / STG-001 .-> PB[Response playbook<br/>disable principal, revoke sessions]
+    PB -. Microsoft Graph .-> ENTRA
     OP[Operator<br/>az CLI] -- Run Command / data plane --> RG
 ```
 
@@ -65,7 +67,7 @@ flowchart LR
 | Victims | Windows Server 2022 (optionally with Sysmon) and Ubuntu 24.04, Trusted Launch, no public IPs, nightly auto-shutdown |
 | Deception | Canary Key Vault secret, decoy secrets, canary "payroll export" blob, and (Entra layer) disabled canary user accounts |
 | Detections | 32 scheduled analytics rules generated from YAML (14 core + 7 identity + 5 network + 6 Sysmon endpoint), mapped to MITRE ATT&CK, with entity mappings, custom details and dynamic severity |
-| Response | Allowlist and honeytoken watchlists, automation rule that labels every incident and attaches a triage task checklist |
+| Response | Allowlist and honeytoken watchlists, automation rule that labels every incident and attaches a triage task checklist, and an optional SOAR playbook that auto-disables the principal on a honeytoken hit |
 | Simulation | Bash + az CLI scenarios, Windows/Linux attack chains via Run Command, `verify.sh` closes the loop |
 
 ## Detections
@@ -152,7 +154,9 @@ on a P2 tenant) and re-apply; see [`docs/entra-id.md`](docs/entra-id.md) first.
 To add network detections, set `enable_flow_logs = true` and re-apply; see
 [`docs/network-detections.md`](docs/network-detections.md) (expect 30-75 min
 before flow-log alerts appear). To add Sysmon endpoint detections, set
-`enable_sysmon = true` and re-apply; see [`docs/sysmon.md`](docs/sysmon.md).
+`enable_sysmon = true` and re-apply; see [`docs/sysmon.md`](docs/sysmon.md). To add
+the auto-disable SOAR playbook, set `enable_response_playbook = true` (dry-run by
+default); see [`docs/response-playbook.md`](docs/response-playbook.md).
 The scenarios that temporarily change tenant objects only run when you opt in:
 
 ```bash
@@ -186,6 +190,7 @@ picks up every YAML file and turns it into a Sentinel rule, skipping any whose
 | Gate | What it catches |
 |---|---|
 | `scripts/validate_detections.py` | Schema, duplicate IDs, Sentinel limits (frequency/period bounds, entity and field-mapping counts), valid tactic names, ATT&CK ID formats, entity/custom-detail columns that don't exist in the query, missing simulation scripts, stale catalog |
+| Playbook ARM templates | Validated as JSON in CI (`terraform/playbooks/*.json`) |
 | `scripts/kql/check.js` | **KQL syntax and semantic analysis** using Microsoft's `Kusto.Language` library against a declared table schema: unknown tables/columns, columns referenced after a `summarize` dropped them, type errors |
 | `terraform test` | Offline plan tests with mocked providers: correct rule counts for every data-source combination (core 14, no-VM 8, +network 19, +sysmon 20, +Entra 20/21), Sysmon collected into the Event table and gated on the Windows VM, canary accounts disabled and on the watchlist, VNet flow log targets the VNet, no optional resources unless opted in, firewalls default-deny, variable validation |
 | `terraform fmt` / `validate`, `tflint` (+ azurerm ruleset) | Style, schema, retired VM sizes, invalid SKUs |
@@ -239,6 +244,13 @@ one being deleted are the same detection but not the same page. ENT-005 computes
 an `AlertSeverity` column and the loader wires it to Sentinel's
 `alert_details_override`, which the validator checks (the column must exist, and
 custom alert names must keep the `[ID]` prefix `verify.sh` relies on).
+
+**SOAR response ships in dry-run.** The auto-disable playbook (KV-001 / STG-001 ->
+disable the Entra ID principal) defaults to commenting *"would disable X"* instead
+of acting, and the Graph permission that lets it actually disable a user is a
+separate opt-in. You roll it out in stages - deploy, watch it identify the right
+principal on a real incident, then enforce - which is how you'd introduce any
+automatic containment without it becoming its own denial-of-service.
 
 **Sysmon lands in `Event`, not `SecurityEvent`.** AMA collects the Sysmon
 operational channel through the `Microsoft-Event` stream, so the SYS-* rules
@@ -297,6 +309,8 @@ exercising them.
 | ENT-003..006 show MISSING | They only run with `ALLOW_TENANT_CHANGES=1`; a 403 from Graph means the CLI token or your Entra role is insufficient (see [`docs/entra-id.md`](docs/entra-id.md)) |
 | NET-* show MISSING | Traffic Analytics adds 10-60 min processing latency; wait 30-75 min and confirm the `NTANetAnalytics` table has data. NET-004 is not auto-simulated |
 | SYS-* show MISSING | Confirm the `Event` table has `Source == "Microsoft-Windows-Sysmon"` rows; if not, check the install-sysmon Run Command output and that the VM had egress to download Sysmon. SYS-005 is not auto-simulated |
+| Playbook comments "no Account entity found" | The incident carried no Account entity - set `enable_entra_id = true` so there's a user to act on, and confirm the detection's entity mappings. Validate in dry-run before enforcing |
+| Graph app-role assignment fails on apply | Assigning `User.ReadWrite.All` needs Privileged Role Administrator / Global Administrator; run that apply as such, or leave `playbook_grant_graph = false` and stay in dry-run |
 
 ## Repo layout
 
@@ -318,6 +332,8 @@ exercising them.
 │   ├── entra.tf                # Entra ID logs, canary accounts, sim targets
 │   ├── netwatch.tf             # VNet flow logs + Traffic Analytics
 │   ├── sysmon.tf               # Sysmon install + DCR into the Event table
+│   ├── response.tf             # auto-disable playbook, RBAC, automation rule
+│   ├── playbooks/              # Logic App ARM templates
 │   ├── detections.tf           # YAML -> Sentinel rule loader
 │   ├── sentinel.tf             # watchlist, automation rule
 │   ├── tests/plan.tftest.hcl   # offline plan tests
@@ -329,7 +345,8 @@ exercising them.
 │   ├── detection-catalog.md    # generated
 │   ├── entra-id.md             # identity layer: prerequisites, roles, safety
 │   ├── network-detections.md   # flow logs: cost, latency, tuning
-│   └── sysmon.md               # Sysmon: config, EventData parsing, safety
+│   ├── sysmon.md               # Sysmon: config, EventData parsing, safety
+│   └── response-playbook.md    # SOAR playbook: dry-run model, Graph grant
 └── .github/workflows/ci.yml
 ```
 
@@ -337,7 +354,7 @@ exercising them.
 
 - [x] Entra ID sign-in/audit/risk logs and identity detections ([docs](docs/entra-id.md))
 - [x] VNet flow logs + Traffic Analytics, network detections ([docs](docs/network-detections.md))
-- [ ] Logic App playbook: auto-disable principal on KV-001 / STG-001
+- [x] Logic App playbook: auto-disable principal on KV-001 / STG-001 ([docs](docs/response-playbook.md))
 - [x] Sysmon on the Windows host ([docs](docs/sysmon.md))
 - [ ] Atomic Red Team integration for broader technique coverage
 - [ ] Remote state backend + GitHub Actions OIDC deployment
