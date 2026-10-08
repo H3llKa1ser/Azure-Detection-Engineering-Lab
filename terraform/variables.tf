@@ -153,3 +153,27 @@ variable "sysmon_config_url" {
   type        = string
   default     = ""
 }
+
+variable "enable_response_playbook" {
+  description = "Deploy the auto-disable-principal Logic App playbook and the automation rule that runs it on KV-001 / STG-001. Requires enable_entra_id for a user to disable, and tenant rights (see docs)."
+  type        = bool
+  default     = false
+}
+
+variable "playbook_dry_run" {
+  description = "Playbook only comments what it WOULD do instead of disabling the principal. Keep true until you trust it."
+  type        = bool
+  default     = true
+}
+
+variable "playbook_auto_run" {
+  description = "Create the automation rule that runs the playbook automatically. If false, the playbook is deployed but only run manually from an incident."
+  type        = bool
+  default     = true
+}
+
+variable "playbook_grant_graph" {
+  description = "Grant the playbook's managed identity the Graph User.ReadWrite.All app role so it can disable users. Needs Privileged Role Administrator / Global Administrator. Only meaningful when playbook_dry_run = false."
+  type        = bool
+  default     = false
+}
