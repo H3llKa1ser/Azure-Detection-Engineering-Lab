@@ -30,5 +30,13 @@ flow_log_interval_minutes = 10
 enable_sysmon     = false
 sysmon_config_url = ""
 
+# SOAR: auto-disable the principal on KV-001 / STG-001. Dry-run by default (only
+# comments). Enforcing needs playbook_dry_run=false + playbook_grant_graph=true
+# and tenant admin at apply time. See docs/response-playbook.md.
+enable_response_playbook = false
+playbook_dry_run         = true
+playbook_auto_run        = true
+playbook_grant_graph     = false
+
 # Break-glass accounts / CI service principals. Do NOT add yourself.
 approved_privileged_callers = []
