@@ -59,6 +59,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: tflint --format compact
+      - name: Bootstrap module - init / validate / test / tflint
+        working-directory: terraform/bootstrap
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+          terraform test
+          tflint --config ../.tflint.hcl --format compact
 
   checkov:
     name: Checkov IaC scan
@@ -80,3 +87,13 @@ jobs:
       - run: |
           shellcheck simulate/*.sh simulate/lib/*.sh simulate/scenarios/*.sh \
                      simulate/payloads/*.sh terraform/scripts/*.sh
+
+  actionlint:
+    name: Lint GitHub Actions workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: actionlint
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color
