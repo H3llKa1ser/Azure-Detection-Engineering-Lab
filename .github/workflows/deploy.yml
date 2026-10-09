@@ -1,0 +1,153 @@
+name: deploy
+
+# Secretless deployment of the lab via OIDC workload identity federation.
+#   - PRs touching the lab: `terraform plan`, summary on the run page.
+#   - Manual dispatch: plan | apply | destroy. apply/destroy run in the
+#     protected "lab" environment (add required reviewers in repo settings).
+# Every job is skipped until the bootstrap repo variables exist, so the repo
+# works (and CI stays green) before Azure is wired up.
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - "detections/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "What to run"
+        type: choice
+        options: [plan, apply, destroy]
+        default: plan
+
+permissions:
+  contents: read
+  id-token: write # request the OIDC token; nothing else is writable
+
+concurrency:
+  group: lab-deploy # one state-changing run at a time (state also blob-lease locked)
+  cancel-in-progress: false
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  # azurerm provider + backend authenticate with the GitHub OIDC token.
+  ARM_USE_OIDC: "true"
+  ARM_USE_AZUREAD: "true"
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  # Runner IP is auto-detected as operator_ip; keep YOUR IP allowed too.
+  TF_VAR_additional_allowed_ips: ${{ vars.OPERATOR_ALLOWED_IPS || '[]' }}
+
+jobs:
+  plan:
+    name: terraform plan
+    if: >-
+      vars.AZURE_CLIENT_ID != '' &&
+      (
+        (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+        (github.event_name == 'workflow_dispatch' && inputs.action == 'plan')
+      )
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.5"
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Wire remote backend
+        run: ../.github/scripts/wire-backend.sh
+        env:
+          TFSTATE_RESOURCE_GROUP: ${{ vars.TFSTATE_RESOURCE_GROUP }}
+          TFSTATE_STORAGE_ACCOUNT: ${{ vars.TFSTATE_STORAGE_ACCOUNT }}
+          TFSTATE_CONTAINER: ${{ vars.TFSTATE_CONTAINER }}
+          LAB_TFVARS: ${{ vars.LAB_TFVARS }}
+      - run: terraform init
+      - run: terraform plan -lock-timeout=5m -out=tfplan
+      - name: Plan summary
+        if: always()
+        run: |
+          if [ -f tfplan ]; then
+            {
+              echo "## terraform plan"
+              echo '```'
+              terraform show -no-color tfplan | grep -E '^Plan:|^No changes|will be (created|destroyed|updated|replaced)' | head -200
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  apply:
+    name: terraform apply
+    if: vars.AZURE_CLIENT_ID != '' && github.event_name == 'workflow_dispatch' && inputs.action == 'apply'
+    runs-on: ubuntu-latest
+    environment: lab # OIDC subject repo:<owner>/<repo>:environment:lab
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.5"
+      - uses: azure/login@v2 # az CLI is used by the honeytoken seed script
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Wire remote backend
+        run: ../.github/scripts/wire-backend.sh
+        env:
+          TFSTATE_RESOURCE_GROUP: ${{ vars.TFSTATE_RESOURCE_GROUP }}
+          TFSTATE_STORAGE_ACCOUNT: ${{ vars.TFSTATE_STORAGE_ACCOUNT }}
+          TFSTATE_CONTAINER: ${{ vars.TFSTATE_CONTAINER }}
+          LAB_TFVARS: ${{ vars.LAB_TFVARS }}
+      - run: terraform init
+      - run: terraform plan -lock-timeout=5m -out=tfplan
+      - run: terraform apply -lock-timeout=5m -auto-approve tfplan
+      - name: Apply summary
+        run: |
+          {
+            echo "## Lab deployed"
+            echo "Deployed detections: $(terraform output -json deployed_detections | jq -r 'join(", ")')"
+            echo
+            echo "Run simulations from your machine (your IP is in OPERATOR_ALLOWED_IPS):"
+            echo "    make init-remote && make simulate"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  destroy:
+    name: terraform destroy
+    if: vars.AZURE_CLIENT_ID != '' && github.event_name == 'workflow_dispatch' && inputs.action == 'destroy'
+    runs-on: ubuntu-latest
+    environment: lab
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.5"
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Wire remote backend
+        run: ../.github/scripts/wire-backend.sh
+        env:
+          TFSTATE_RESOURCE_GROUP: ${{ vars.TFSTATE_RESOURCE_GROUP }}
+          TFSTATE_STORAGE_ACCOUNT: ${{ vars.TFSTATE_STORAGE_ACCOUNT }}
+          TFSTATE_CONTAINER: ${{ vars.TFSTATE_CONTAINER }}
+          LAB_TFVARS: ${{ vars.LAB_TFVARS }}
+      - run: terraform init
+      - run: terraform destroy -lock-timeout=5m -auto-approve
