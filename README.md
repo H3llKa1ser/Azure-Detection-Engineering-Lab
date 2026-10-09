@@ -1,6 +1,7 @@
 # Azure Detection Engineering Lab
 
 [![ci](https://github.com/H3llKa1ser/Azure-Detection-Engineering-Lab/actions/workflows/ci.yml/badge.svg)](https://github.com/H3llKa1ser/Azure-Detection-Engineering-Lab/actions/workflows/ci.yml)
+[![deploy](https://github.com/H3llKa1ser/Azure-Detection-Engineering-Lab/actions/workflows/deploy.yml/badge.svg)](https://github.com/H3llKa1ser/Azure-Detection-Engineering-Lab/actions/workflows/deploy.yml)
 ![Terraform](https://img.shields.io/badge/terraform-%E2%89%A51.9-7B42BC)
 ![azurerm](https://img.shields.io/badge/azurerm-5.x-0078D4)
 ![Detections](https://img.shields.io/badge/detections-32-success)
@@ -172,6 +173,10 @@ triage tasks.
 make destroy       # when you're done - everything is disposable
 ```
 
+To deploy from GitHub Actions instead (secretless OIDC, remote state, apply gated
+by an environment reviewer), run `make bootstrap` once and follow
+[`docs/remote-state-and-oidc.md`](docs/remote-state-and-oidc.md).
+
 To broaden technique coverage with Atomic Red Team (purple-team style - fire a
 real technique, confirm the rule alerts):
 
@@ -204,6 +209,8 @@ picks up every YAML file and turns it into a Sentinel rule, skipping any whose
 |---|---|
 | `scripts/validate_detections.py` | Schema, duplicate IDs, Sentinel limits (frequency/period bounds, entity and field-mapping counts), valid tactic names, ATT&CK ID formats, entity/custom-detail columns that don't exist in the query, missing simulation scripts, stale catalog |
 | Playbook ARM templates | Validated as JSON in CI (`terraform/playbooks/*.json`) |
+| Bootstrap `terraform test` | State storage hardening, exact OIDC subjects, RBAC Administrator constrained by ABAC to the lab's four roles |
+| actionlint | Workflow syntax, expression types, and shellcheck over every `run:` block |
 | `scripts/validate_atomics.py` | Atomic Red Team map: every entry ties to a real detection and a technique it declares; reports endpoint coverage |
 | `scripts/kql/check.js` | **KQL syntax and semantic analysis** using Microsoft's `Kusto.Language` library against a declared table schema: unknown tables/columns, columns referenced after a `summarize` dropped them, type errors |
 | `terraform test` | Offline plan tests with mocked providers: correct rule counts for every data-source combination (core 14, no-VM 8, +network 19, +sysmon 20, +Entra 20/21), Sysmon collected into the Event table and gated on the Windows VM, canary accounts disabled and on the watchlist, VNet flow log targets the VNet, no optional resources unless opted in, firewalls default-deny, variable validation |
@@ -258,6 +265,14 @@ one being deleted are the same detection but not the same page. ENT-005 computes
 an `AlertSeverity` column and the loader wires it to Sentinel's
 `alert_details_override`, which the validator checks (the column must exist, and
 custom alert names must keep the `[ID]` prefix `verify.sh` relies on).
+
+**Secretless deployment with a pipeline that can't escalate.** GitHub Actions
+deploys via OIDC workload identity federation, so there's no client secret to
+leak. Three exact-match federated subjects separate trust levels: a PR token can
+only plan, and apply/destroy need the protected `lab` environment. The pipeline
+gets Contributor plus RBAC Administrator *constrained by an ABAC condition* to
+the four roles the lab itself assigns, so it can wire up the lab but can never
+grant Owner, to itself or anyone.
 
 **Atomic Red Team is mapped, not bolted on.** Rather than "run every atomic",
 `simulate/atomic/atomic-map.yaml` ties each test to the detection it should
@@ -331,6 +346,9 @@ exercising them.
 | ENT-003..006 show MISSING | They only run with `ALLOW_TENANT_CHANGES=1`; a 403 from Graph means the CLI token or your Entra role is insufficient (see [`docs/entra-id.md`](docs/entra-id.md)) |
 | NET-* show MISSING | Traffic Analytics adds 10-60 min processing latency; wait 30-75 min and confirm the `NTANetAnalytics` table has data. NET-004 is not auto-simulated |
 | SYS-* show MISSING | Confirm the `Event` table has `Source == "Microsoft-Windows-Sysmon"` rows; if not, check the install-sysmon Run Command output and that the VM had egress to download Sysmon. SYS-005 is not auto-simulated |
+| deploy jobs all show "skipped" | Expected until the bootstrap repo variables are set (`make bootstrap`, then the printed `gh variable set` commands) |
+| deploy `apply` fails on a role assignment | The ABAC condition only allows the lab's four roles; if you add a layer that assigns a new role, add it to `delegable_roles` in `terraform/bootstrap/main.tf` and re-apply bootstrap |
+| Simulations get 403 after a CI deploy | Your IP isn't in `OPERATOR_ALLOWED_IPS`; the runner's IP was used as `operator_ip` |
 | Playbook comments "no Account entity found" | The incident carried no Account entity - set `enable_entra_id = true` so there's a user to act on, and confirm the detection's entity mappings. Validate in dry-run before enforcing |
 | Graph app-role assignment fails on apply | Assigning `User.ReadWrite.All` needs Privileged Role Administrator / Global Administrator; run that apply as such, or leave `playbook_grant_graph = false` and stay in dry-run |
 
@@ -360,6 +378,8 @@ exercising them.
 │   ├── detections.tf           # YAML -> Sentinel rule loader
 │   ├── sentinel.tf             # watchlist, automation rule
 │   ├── tests/plan.tftest.hcl   # offline plan tests
+│   ├── bootstrap/              # one-time: remote state + GitHub OIDC identity
+│   ├── backend.hcl.example     # remote-state config for local use
 │   └── scripts/seed-honeytokens.sh
 ├── scripts/
 │   ├── validate_detections.py  # lint + catalog generator
@@ -367,12 +387,15 @@ exercising them.
 │   └── kql/                    # Kusto.Language semantic checker + schema
 ├── docs/
 │   ├── detection-catalog.md    # generated
+│   ├── remote-state-and-oidc.md  # bootstrap, OIDC subjects, least-privilege RBAC
 │   ├── entra-id.md             # identity layer: prerequisites, roles, safety
 │   ├── network-detections.md   # flow logs: cost, latency, tuning
 │   ├── sysmon.md               # Sysmon: config, EventData parsing, safety
 │   ├── response-playbook.md    # SOAR playbook: dry-run model, Graph grant
 │   └── atomic-red-team.md      # ART map, GUID pinning, risk tiers
-└── .github/workflows/ci.yml
+└── .github/
+    ├── workflows/ci.yml  deploy.yml
+    └── scripts/wire-backend.sh
 ```
 
 ## Roadmap
@@ -382,7 +405,7 @@ exercising them.
 - [x] Logic App playbook: auto-disable principal on KV-001 / STG-001 ([docs](docs/response-playbook.md))
 - [x] Sysmon on the Windows host ([docs](docs/sysmon.md))
 - [x] Atomic Red Team integration for broader technique coverage ([docs](docs/atomic-red-team.md))
-- [ ] Remote state backend + GitHub Actions OIDC deployment
+- [x] Remote state backend + GitHub Actions OIDC deployment ([docs](docs/remote-state-and-oidc.md))
 
 ## Disclaimer
 
