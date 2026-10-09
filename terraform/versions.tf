@@ -32,7 +32,10 @@ terraform {
     }
   }
 
-  # Local state by default. For anything beyond a personal lab, use a remote
-  # backend (azurerm backend + storage account with versioning and a lock).
-  # backend "azurerm" {}
+  # Local state by default. Remote state (azurerm backend, Entra ID auth,
+  # versioned + soft-deleted blobs, native blob-lease locking) is opt-in:
+  # `make init-remote` locally, or the GitHub Actions deploy workflow, writes a
+  # gitignored backend_remote.tf and inits with backend.hcl / repo variables.
+  # See docs/remote-state-and-oidc.md. A backend block can't be conditional,
+  # which is why it's generated rather than committed.
 }

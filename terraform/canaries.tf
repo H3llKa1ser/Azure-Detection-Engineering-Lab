@@ -29,7 +29,7 @@ resource "azurerm_key_vault" "canary" {
   network_acls {
     default_action = "Deny"
     bypass         = "AzureServices"
-    ip_rules       = [local.operator_ip]
+    ip_rules       = local.allowed_ips
   }
 }
 
@@ -84,7 +84,7 @@ resource "azurerm_storage_account" "canary" {
   network_rules {
     default_action = "Deny"
     bypass         = ["AzureServices", "Logging", "Metrics"]
-    ip_rules       = [local.operator_ip]
+    ip_rules       = local.allowed_ips
   }
 
   sas_policy {

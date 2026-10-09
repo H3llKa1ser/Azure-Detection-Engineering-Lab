@@ -380,6 +380,40 @@ run "response_playbook_manual_only_skips_automation" {
   }
 }
 
+run "ci_allowlist_keeps_operator_and_runner" {
+  command = plan
+
+  variables {
+    operator_ip            = "198.51.100.7"
+    additional_allowed_ips = ["203.0.113.50", "198.51.100.7"]
+  }
+
+  assert {
+    condition     = local.allowed_ips == tolist(["198.51.100.7", "203.0.113.50"])
+    error_message = "Allowlist should be operator IP + additional IPs, de-duplicated, operator first."
+  }
+
+  assert {
+    condition     = azurerm_key_vault.canary.network_acls[0].ip_rules == toset(["198.51.100.7", "203.0.113.50"])
+    error_message = "Key Vault firewall must allow both the runner and the operator."
+  }
+
+  assert {
+    condition     = toset(azurerm_storage_account.canary.network_rules[0].ip_rules) == toset(["198.51.100.7", "203.0.113.50"])
+    error_message = "Storage firewall must allow both the runner and the operator."
+  }
+}
+
+run "rejects_cidr_in_allowlist" {
+  command = plan
+
+  variables {
+    additional_allowed_ips = ["203.0.113.0/24"]
+  }
+
+  expect_failures = [var.additional_allowed_ips]
+}
+
 run "p2_requires_entra" {
   command = plan
 

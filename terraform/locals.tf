@@ -19,6 +19,11 @@ locals {
   name        = "${var.prefix}-${local.suffix}"
   operator_ip = var.operator_ip != null ? var.operator_ip : chomp(data.http.operator_ip[0].response_body)
 
+  # Firewall allowlist for Key Vault and Storage. In CI the auto-detected
+  # operator IP is the GitHub runner (different every run), so your own IP is
+  # passed in additional_allowed_ips to keep simulations working.
+  allowed_ips = distinct(concat([local.operator_ip], var.additional_allowed_ips))
+
   tags = merge({
     project     = "azure-detection-engineering-lab"
     environment = "lab"

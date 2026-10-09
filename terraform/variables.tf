@@ -177,3 +177,14 @@ variable "playbook_grant_graph" {
   type        = bool
   default     = false
 }
+
+variable "additional_allowed_ips" {
+  description = "Extra public IPv4 addresses (no CIDR) allowed through the Key Vault and Storage firewalls, on top of operator_ip. Used by the GitHub Actions deployment to keep your own IP allowed while the runner's IP changes per run."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for ip in var.additional_allowed_ips : can(regex("^\\d{1,3}(\\.\\d{1,3}){3}$", ip))])
+    error_message = "additional_allowed_ips must be bare IPv4 addresses (no CIDR suffix)."
+  }
+}

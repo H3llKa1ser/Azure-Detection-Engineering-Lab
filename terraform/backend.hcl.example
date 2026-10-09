@@ -1,0 +1,8 @@
+# Remote state (azurerm backend). Copy to backend.hcl and fill in from
+#   terraform -chdir=terraform/bootstrap output -raw backend_hcl
+# then run `make init-remote`. backend.hcl is gitignored.
+resource_group_name  = "rg-tfstate-detlab-xxxxx"
+storage_account_name = "sttfstatexxxxx"
+container_name       = "tfstate"
+key                  = "lab.tfstate"
+use_azuread_auth     = true

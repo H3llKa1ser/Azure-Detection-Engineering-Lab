@@ -7,6 +7,10 @@ prefix   = "detlab"
 # Leave unset to auto-detect via api.ipify.org
 # operator_ip = "203.0.113.10"
 
+# Extra IPs allowed through the Key Vault / Storage firewalls (bare IPv4).
+# CI sets this from the OPERATOR_ALLOWED_IPS repo variable.
+additional_allowed_ips = []
+
 deploy_windows_vm = true
 deploy_linux_vm   = true
 
